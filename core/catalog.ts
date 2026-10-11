@@ -1,0 +1,733 @@
+// The component catalog: the only components, actions and functions a UI
+// spec may use. The validator checks specs against it, the renderer draws it,
+// and the agent instructions are generated from it, so all three stay in
+// lockstep.
+
+export type ParamKind =
+  /** Any scalar; numbers and booleans are converted with String(). */
+  | "string"
+  /** Markdown text. */
+  | "text"
+  | "number"
+  | "boolean"
+  /** One of `values`. */
+  | "enum"
+  /** Children: a node, string, number, null/false (dropped), or a nested list of those. Normalized to UiNode[]. */
+  | "nodes"
+  /** Any list. */
+  | "list"
+  /** `number[]`, or an object of series name → `number[]`. */
+  | "series"
+  /** A `$state` reference (two-way binding). Must be written literally as `$name`. */
+  | "binding"
+  /** An action call or a list of action calls. Normalized to Action[]. */
+  | "actions"
+  /** Any value. */
+  | "any";
+
+/** What a bound `$state` must hold. `null` always fits: it means "empty". */
+export type StateKind = "text" | "number" | "boolean" | "scalar" | "list";
+
+export interface ParamSpec {
+  readonly name: string;
+  readonly kind: ParamKind;
+  /** Optional params may be omitted or passed as `null`. */
+  readonly optional?: boolean;
+  /** Required param that may also be `null`. */
+  readonly nullable?: boolean;
+  /** Allowed literals for `enum`. */
+  readonly values?: readonly string[];
+  /** For `binding`: the state's required type, checked at compile and evaluation time. */
+  readonly holds?: StateKind;
+}
+
+export interface ComponentSpec {
+  readonly params: readonly ParamSpec[];
+  /** Guidance for the agent instructions, only where the signature alone would mislead. */
+  readonly summary?: string;
+}
+
+/** Instruction-prompt grouping; one line per group. */
+export type ComponentGroup = "Layout" | "Content" | "Media" | "Data" | "Inputs" | "Widgets" | "Project" | "Dev" | "Manage" | "Evidence";
+
+export interface CatalogComponentSpec extends ComponentSpec {
+  readonly group: ComponentGroup;
+}
+
+const TONES = ["neutral", "good", "warn", "bad", "info"] as const;
+
+const tone = { name: "tone", kind: "enum", optional: true, values: TONES } as const;
+const label = { name: "label", kind: "string", optional: true } as const;
+const children = { name: "children", kind: "nodes" } as const;
+
+export const COMPONENTS = {
+  Card: {
+    group: "Layout",
+    params: [{ name: "title", kind: "string", nullable: true }, children],
+  },
+  Row: {
+    group: "Layout",
+    params: [children],
+    summary: "equal-width, wraps",
+  },
+  Stack: {
+    group: "Layout",
+    params: [children],
+  },
+  Grid: {
+    group: "Layout",
+    params: [children, { name: "columns", kind: "number", optional: true }],
+    summary: "tiles",
+  },
+  Tabs: {
+    group: "Layout",
+    params: [{ name: "labels", kind: "list" }, children],
+  },
+  Details: {
+    group: "Layout",
+    params: [{ name: "title", kind: "string" }, children, { name: "open", kind: "boolean", optional: true }],
+    summary: "collapsible",
+  },
+  Divider: {
+    group: "Layout",
+    params: [],
+  },
+  Text: {
+    group: "Content",
+    params: [{ name: "text", kind: "text" }, tone],
+    summary: "markdown",
+  },
+  Callout: {
+    group: "Content",
+    params: [{ name: "text", kind: "text" }, tone, { name: "title", kind: "string", optional: true }],
+  },
+  Metric: {
+    group: "Content",
+    params: [
+      { name: "label", kind: "string" },
+      { name: "value", kind: "string" },
+      { name: "note", kind: "string", optional: true },
+      tone,
+    ],
+    summary: "key number; 2-4 in a Row",
+  },
+  Badge: {
+    group: "Content",
+    params: [{ name: "text", kind: "string" }, tone],
+    summary: "1-3 word status; explain in the next cell",
+  },
+  Icon: {
+    group: "Content",
+    params: [{ name: "name", kind: "string" }, tone],
+    summary: "lucide name",
+  },
+  KeyValue: {
+    group: "Content",
+    params: [{ name: "pairs", kind: "any" }],
+    summary: "object or [[k, v]]",
+  },
+  Image: {
+    group: "Content",
+    params: [{ name: "src", kind: "string" }, { name: "alt", kind: "string", optional: true }],
+    summary: "path or https URL; the only way the user sees an image (they never see images your tools open)",
+  },
+  File: {
+    group: "Content",
+    params: [
+      { name: "path", kind: "string" },
+      { name: "line", kind: "number", optional: true },
+    ],
+  },
+  Table: {
+    group: "Data",
+    params: [
+      { name: "columns", kind: "list" },
+      { name: "rows", kind: "list" },
+    ],
+    summary: "rows: lists of values or components",
+  },
+  Chart: {
+    group: "Data",
+    params: [
+      { name: "type", kind: "enum", values: ["bar", "line", "area", "pie", "scatter", "radar", "funnel", "heatmap"] },
+      { name: "labels", kind: "list" },
+      { name: "series", kind: "series" },
+      { name: "unit", kind: "string", optional: true },
+      { name: "stacked", kind: "boolean", optional: true },
+    ],
+    summary: "series: numbers or {name: numbers}; scatter: labels are the x values; heatmap: one series per row",
+  },
+  Sparkline: {
+    group: "Data",
+    params: [{ name: "values", kind: "list" }, tone],
+  },
+  Progress: {
+    group: "Data",
+    params: [
+      { name: "value", kind: "number" },
+      { name: "max", kind: "number", optional: true },
+      label,
+      tone,
+    ],
+    summary: "% without max",
+  },
+  Steps: {
+    group: "Data",
+    params: [{ name: "items", kind: "list" }],
+    summary: "{title,detail?,status?:done|current|blocked}",
+  },
+  Timeline: {
+    group: "Data",
+    params: [{ name: "items", kind: "list" }],
+    summary: "{time,title,detail?,tone?}",
+  },
+  Tree: {
+    group: "Data",
+    params: [{ name: "items", kind: "list" }],
+    summary: "paths or {label,children?,note?}",
+  },
+  Code: {
+    group: "Data",
+    params: [
+      { name: "code", kind: "string" },
+      { name: "language", kind: "string", optional: true },
+    ],
+  },
+  Snippet: {
+    group: "Data",
+    params: [
+      { name: "path", kind: "string" },
+      { name: "from", kind: "number", optional: true },
+      { name: "to", kind: "number", optional: true },
+    ],
+    summary: "lines of a file, 1-based",
+  },
+  Diff: {
+    group: "Data",
+    params: [{ name: "patch", kind: "string" }],
+    summary: "unified, one file",
+  },
+  Diagram: {
+    group: "Data",
+    params: [
+      { name: "mermaid", kind: "string" },
+      { name: "details", kind: "any", optional: true },
+    ],
+    summary: "details {nodeId: text or components} open when that node is clicked",
+  },
+  Slider: {
+    group: "Inputs",
+    params: [
+      { name: "value", kind: "binding", holds: "number" },
+      { name: "min", kind: "number" },
+      { name: "max", kind: "number" },
+      { name: "step", kind: "number", optional: true },
+      label,
+    ],
+  },
+  Stepper: {
+    group: "Inputs",
+    params: [
+      { name: "value", kind: "binding", holds: "number" },
+      { name: "min", kind: "number", optional: true },
+      { name: "max", kind: "number", optional: true },
+      { name: "step", kind: "number", optional: true },
+      label,
+    ],
+    summary: "counts",
+  },
+  Toggle: {
+    group: "Inputs",
+    params: [
+      { name: "value", kind: "binding", holds: "boolean" },
+      { name: "label", kind: "string" },
+    ],
+  },
+  Choice: {
+    group: "Inputs",
+    params: [{ name: "value", kind: "binding", holds: "scalar" }, { name: "options", kind: "list" }, label],
+    summary: "short options",
+  },
+  Radio: {
+    group: "Inputs",
+    params: [{ name: "value", kind: "binding", holds: "scalar" }, { name: "options", kind: "list" }, label],
+    summary: "{value,detail} options",
+  },
+  Select: {
+    group: "Inputs",
+    params: [{ name: "value", kind: "binding", holds: "scalar" }, { name: "options", kind: "list" }, label],
+    summary: "many options",
+  },
+  Checklist: {
+    group: "Inputs",
+    params: [{ name: "value", kind: "binding", holds: "list" }, { name: "options", kind: "list" }, label],
+    summary: "multi-select, state []",
+  },
+  ListEditor: {
+    group: "Inputs",
+    params: [
+      { name: "value", kind: "binding", holds: "list" },
+      label,
+      { name: "placeholder", kind: "string", optional: true },
+    ],
+    summary: "editable list of strings",
+  },
+  Input: {
+    group: "Inputs",
+    params: [
+      { name: "value", kind: "binding", holds: "text" },
+      label,
+      { name: "placeholder", kind: "string", optional: true },
+    ],
+  },
+  TextArea: {
+    group: "Inputs",
+    params: [
+      { name: "value", kind: "binding", holds: "text" },
+      label,
+      { name: "placeholder", kind: "string", optional: true },
+    ],
+  },
+  DateInput: {
+    group: "Inputs",
+    params: [{ name: "value", kind: "binding", holds: "text" }, label],
+    summary: "yyyy-mm-dd",
+  },
+  Rating: {
+    group: "Inputs",
+    params: [
+      { name: "value", kind: "binding", holds: "number" },
+      { name: "max", kind: "number", optional: true },
+      label,
+    ],
+  },
+  Button: {
+    group: "Inputs",
+    params: [
+      { name: "label", kind: "string" },
+      { name: "action", kind: "actions", optional: true },
+      {
+        name: "variant",
+        kind: "enum",
+        optional: true,
+        values: ["primary", "secondary", "destructive"],
+      },
+      { name: "icon", kind: "string", optional: true },
+    ],
+    summary:
+      "no action sends its label as the user's reply; primary for the one main action, destructive for deleting or discarding; icon: lucide name",
+  },
+  Form: {
+    group: "Inputs",
+    params: [children, { name: "submit", kind: "string", optional: true }],
+    summary: "one labeled field per question; submit sends every answer in one message",
+  },
+  Timer: {
+    group: "Widgets",
+    params: [{ name: "seconds", kind: "number", optional: true }, label],
+    summary: "no seconds = stopwatch",
+  },
+  Quiz: {
+    group: "Widgets",
+    params: [{ name: "questions", kind: "list" }],
+    summary: "{q,options,answer:index,why?}",
+  },
+  Flashcards: {
+    group: "Widgets",
+    params: [{ name: "cards", kind: "list" }],
+    summary: "{front,back}",
+  },
+  // Added from ChatGPT's catalog (see README "Components").
+  ImageSearch: {
+    group: "Media",
+    params: [
+      { name: "query", kind: "string" },
+      { name: "alt", kind: "string", optional: true },
+      { name: "aspect", kind: "enum", optional: true, values: ["wide", "square", "tall"] },
+    ],
+    summary: "a photo found on the web from a description, credited; for things no file shows; aspect wide by default",
+  },
+  Gallery: {
+    group: "Media",
+    params: [
+      { name: "images", kind: "list" },
+      { name: "columns", kind: "number", optional: true },
+    ],
+    summary: "paths, https URLs or {src|query, caption?}",
+  },
+  Map: {
+    group: "Media",
+    params: [
+      { name: "places", kind: "list" },
+      { name: "route", kind: "boolean", optional: true },
+    ],
+    summary: "{name, lat?, lng?, note?}; names without lat/lng are looked up; route joins them in order",
+  },
+  Hotspots: {
+    group: "Media",
+    params: [
+      { name: "image", kind: "string" },
+      { name: "points", kind: "list" },
+    ],
+    summary: "numbered pins on an image: {x, y (% across, down), title, text?}",
+  },
+  Entity: {
+    group: "Content",
+    params: [
+      { name: "name", kind: "string" },
+      { name: "kind", kind: "enum", optional: true, values: ["product", "place", "person", "org", "link", "other"] },
+      { name: "image", kind: "string", optional: true },
+      { name: "facts", kind: "any", optional: true },
+      { name: "url", kind: "string", optional: true },
+      { name: "note", kind: "text", optional: true },
+    ],
+    summary: "a product, place or person card; facts {label: value} open in its detail view",
+  },
+  Sources: {
+    group: "Content",
+    params: [{ name: "links", kind: "list" }],
+    summary: "https URLs or {url, title?, note?}",
+  },
+  List: {
+    group: "Content",
+    params: [{ name: "items", kind: "list" }],
+    summary: "rows {title, detail?, icon?, value?, tone?, action?}",
+  },
+  Calendar: {
+    group: "Data",
+    params: [
+      { name: "events", kind: "list" },
+      { name: "month", kind: "string", optional: true },
+    ],
+    summary: "{date: yyyy-mm-dd, title, tone?} on a month grid; month yyyy-mm",
+  },
+  Gauge: {
+    group: "Data",
+    params: [
+      { name: "value", kind: "number" },
+      { name: "min", kind: "number", optional: true },
+      { name: "max", kind: "number", optional: true },
+      label,
+      tone,
+    ],
+    summary: "a dial; max defaults to 100",
+  },
+  CalendarHeatmap: {
+    group: "Data",
+    params: [{ name: "days", kind: "any" }, label, tone],
+    summary: "{yyyy-mm-dd: count} or [{date, value}]",
+  },
+  SegmentedBar: {
+    group: "Data",
+    params: [
+      { name: "parts", kind: "list" },
+      { name: "unit", kind: "string", optional: true },
+    ],
+    summary: "shares of one whole: {label, value, tone?}",
+  },
+  Carousel: {
+    group: "Layout",
+    params: [children],
+    summary: "a swipeable row of cards",
+  },
+  OptionCards: {
+    group: "Inputs",
+    params: [{ name: "value", kind: "binding" }, { name: "options", kind: "list" }, label],
+    summary: "picture or detail options {value, title?, detail?, image?, icon?}; a list state picks several",
+  },
+  Swatches: {
+    group: "Inputs",
+    params: [
+      { name: "colors", kind: "list" },
+      { name: "value", kind: "binding", holds: "text", optional: true },
+      label,
+    ],
+    summary: "CSS colors or {value, name?}; with a $state the user picks one",
+  },
+  EditableTable: {
+    group: "Inputs",
+    params: [{ name: "value", kind: "binding", holds: "list" }, { name: "columns", kind: "list" }, label],
+    summary: "state: list of row objects; columns: keys or {key, label?, type?: text|number|boolean}, type inferred if omitted",
+  },
+  FollowUps: {
+    group: "Inputs",
+    params: [{ name: "prompts", kind: "list" }],
+    summary: "suggested next questions; a tap sends one",
+  },
+  Walkthrough: {
+    group: "Widgets",
+    params: [{ name: "steps", kind: "list" }],
+    summary: "{title, body, code?, language?} revealed one step at a time",
+  },
+  // Project: the first four read BB's own state for the reply's thread, so the
+  // model writes no data at all; Tests and Json take Load() of a report.
+  Changes: {
+    group: "Project",
+    params: [
+      { name: "target", kind: "string", optional: true },
+      { name: "paths", kind: "list", optional: true },
+    ],
+    summary:
+      'files changed in this thread\'s checkout with +/- and diffs; target: omit for the branch\'s work incl. uncommitted, "uncommitted", or a commit sha; paths filters',
+  },
+  Commits: {
+    group: "Project",
+    params: [{ name: "limit", kind: "number", optional: true }],
+    summary: "this branch's commits since the default branch, each opening its changes",
+  },
+  PullRequest: {
+    group: "Project",
+    params: [],
+    summary: "this branch's pull request: state, checks, review",
+  },
+  Threads: {
+    group: "Project",
+    params: [{ name: "ids", kind: "list", optional: true }],
+    summary: "live status of BB threads; omit ids for this thread's subthreads",
+  },
+  Tests: {
+    group: "Project",
+    params: [{ name: "results", kind: "any" }, { name: "title", kind: "string", optional: true }],
+    summary: "Load a vitest/jest JSON or JUnit XML report, or [{name, status: passed|failed|skipped, message?, file?, line?}]",
+  },
+  Json: {
+    group: "Project",
+    params: [{ name: "value", kind: "any" }, label],
+    summary: "collapsible JSON explorer; Load() a big file instead of retyping it",
+  },
+  // Dev: what tools print, read from the file the agent saved (Load), never
+  // retyped: logs, errors, findings, CI runs, coverage, dependencies, timings.
+  Logs: {
+    group: "Dev",
+    params: [
+      { name: "output", kind: "any" },
+      { name: "command", kind: "string", optional: true },
+      { name: "exit", kind: "number", optional: true },
+    ],
+    summary: "Load a log or command output; exit: its exit code",
+  },
+  StackTrace: {
+    group: "Dev",
+    params: [{ name: "trace", kind: "any" }, { name: "title", kind: "string", optional: true }],
+    summary: "an error and its stack, any language",
+  },
+  Findings: {
+    group: "Dev",
+    params: [{ name: "items", kind: "any" }, { name: "title", kind: "string", optional: true }],
+    summary: "review/lint/type errors [{severity, title, file?, line?, detail?, fix?, status?: open|fixed|confirmed|rejected}] or Load ESLint JSON, SARIF, tsc output",
+  },
+  Coverage: {
+    group: "Dev",
+    params: [{ name: "report", kind: "any" }],
+    summary: "Load coverage-summary.json, lcov.info, coverage.py JSON or Go coverage.out",
+  },
+  Dependencies: {
+    group: "Dev",
+    params: [{ name: "report", kind: "any" }],
+    summary: "Load npm outdated/audit --json or pip list --outdated --format=json; or [{name, current, latest}]",
+  },
+  Pipeline: {
+    group: "Dev",
+    params: [{ name: "run", kind: "any" }],
+    summary: "a CI run: Load gh run view --json jobs, or [{name, status, jobs?}]",
+  },
+  Benchmark: {
+    group: "Dev",
+    params: [{ name: "results", kind: "any" }, { name: "unit", kind: "string", optional: true }],
+    summary: "before/after [{name, before, after, better?: lower|higher, context?}], every run [{name, metrics, status?, context?}] or Load hyperfine JSON",
+  },
+  Waterfall: {
+    group: "Dev",
+    params: [{ name: "spans", kind: "any" }, { name: "unit", kind: "string", optional: true }],
+    summary: "timings [{name, start, duration, depth?}] or Load a .har",
+  },
+  Treemap: {
+    group: "Dev",
+    params: [{ name: "items", kind: "any" }, { name: "unit", kind: "string", optional: true }],
+    summary: "sizes [{path, size}] or Load an esbuild metafile",
+  },
+  // Manage: planning and tracking, plus BB's own environments.
+  Board: {
+    group: "Manage",
+    params: [{ name: "items", kind: "any" }, { name: "columns", kind: "list", optional: true }],
+    summary: "kanban: [{title, status, …}] or Load bb tasks list --json, gh issue list --json",
+  },
+  Roadmap: {
+    group: "Manage",
+    params: [{ name: "items", kind: "list" }],
+    summary: "Gantt [{title, start, end, lane?, status?, milestone?}], dates yyyy-mm-dd",
+  },
+  Status: {
+    group: "Manage",
+    params: [{ name: "items", kind: "list" }],
+    summary: "health [{name, status: on-track|at-risk|off-track|done, progress?, owner?, due?, note?}]",
+  },
+  Plan: {
+    group: "Manage",
+    params: [{ name: "steps", kind: "list" }, { name: "submit", kind: "string", optional: true }],
+    summary: "steps the user approves before you start [{title, detail?, files?, risk?, estimate?}]",
+  },
+  Decision: {
+    group: "Manage",
+    params: [
+      { name: "options", kind: "list" },
+      { name: "criteria", kind: "list" },
+    ],
+    summary: "options [{name, scores: 1-5 per criterion, pros?, cons?}] vs criteria; user tunes weights",
+  },
+  Estimate: {
+    group: "Manage",
+    params: [{ name: "tasks", kind: "list" }, { name: "unit", kind: "string", optional: true }],
+    summary: "three-point effort [{title, low, high, likely?}]: P50/P90 total",
+  },
+  Environments: {
+    group: "Manage",
+    params: [],
+    summary: "this project's worktrees: branch, threads, changes, PR",
+  },
+  // Evidence: what is actually proven, running, or heard, as opposed to what
+  // an agent says. Grounded in the user's own BB history (acceptance claims
+  // without proof, visual parity disputes, wrong installed builds, speech).
+  Acceptance: {
+    group: "Evidence",
+    params: [{ name: "criteria", kind: "any" }, { name: "columns", kind: "list", optional: true }],
+    summary:
+      "is it really done (criteria, a review verdict, claimed vs checked): [{name, status | cells: {column: status | {status, note?, evidence?}}}]; passed|failed|blocked|untested|claimed",
+  },
+  Compare: {
+    group: "Evidence",
+    params: [{ name: "images", kind: "list" }],
+    summary: "a visual difference vs a reference or before/after: [src | {src, label?}], reference first; wipe, blink, pixel diff",
+  },
+  Transcript: {
+    group: "Evidence",
+    params: [{ name: "tracks", kind: "any" }, { name: "audio", kind: "string", optional: true }],
+    summary:
+      "transcription or speaker errors: [{name, words: [{text, start, end, speaker?}]} | {name, text}], the first is the reference; WER; a word seeks the audio",
+  },
+  Provenance: {
+    group: "Evidence",
+    params: [{ name: "stages", kind: "list" }, { name: "expected", kind: "any", optional: true }],
+    summary:
+      "which build/revision is really installed or deployed where: [{name, status, facts?: {branch, sha, build, device}}], source to live; expected flags mismatches",
+  },
+} as const satisfies Record<string, CatalogComponentSpec>;
+
+export type ComponentName = keyof typeof COMPONENTS;
+
+/** `Name(a, b?, $state, kind:x|y?)`: how the reference and the gallery write a component's or action's call. */
+export function callSignature(name: string, spec: ComponentSpec): string {
+  const params = spec.params.map((param) => {
+    let base = param.kind === "binding" ? `$${param.name}` : param.name;
+    // Tones are listed once in the reference header; other enums inline their values.
+    if (param.kind === "enum" && param.name !== "tone") {
+      base += `:${param.values?.join("|")}`;
+    }
+    return param.optional ? `${base}?` : base;
+  });
+  return `${name}(${params.join(", ")})`;
+}
+
+/** `Sig: summary`, as the reference lists a component. */
+export function componentSignature(name: ComponentName): string {
+  const spec: ComponentSpec = COMPONENTS[name];
+  const sig = callSignature(name, spec);
+  return spec.summary === undefined ? sig : `${sig}: ${spec.summary}`;
+}
+
+export const ACTIONS = {
+  Send: {
+    params: [{ name: "text", kind: "string" }],
+    summary: "send text as the user's next message",
+  },
+  Set: {
+    params: [
+      { name: "state", kind: "binding" },
+      { name: "value", kind: "any" },
+    ],
+    summary: "assign a state variable",
+  },
+  OpenUrl: {
+    params: [{ name: "url", kind: "string" }],
+    summary: "open an http(s) URL",
+  },
+  Copy: {
+    params: [{ name: "text", kind: "string" }],
+    summary: "copy text to the clipboard",
+  },
+} as const satisfies Record<string, ComponentSpec>;
+
+export type ActionName = keyof typeof ACTIONS;
+
+/** Global pure functions. */
+export const FUNCTIONS = {
+  round: "round(x, digits?)",
+  fmt: "fmt(x, digits?) → grouped string, e.g. 1,234.5",
+  sum: "sum(list)",
+  min: "min(list | ...numbers)",
+  max: "max(list | ...numbers)",
+  abs: "abs(x)",
+  floor: "floor(x)",
+  ceil: "ceil(x)",
+  sqrt: "sqrt(x)",
+  pow: "pow(x, y)",
+  keys: "keys(object) → list of keys",
+  values: "values(object) → list of values",
+  entries: "entries(object) → list of [key, value]",
+  Load: "Load(path): JSON/CSV/TSV/JSONL/text file, workspace-relative or in thread storage",
+} as const;
+
+export type FunctionName = keyof typeof FUNCTIONS;
+
+/** Whitelisted methods by receiver type. Anything else is an error. */
+export const METHODS = {
+  list: [
+    "map",
+    "filter",
+    "find",
+    "some",
+    "every",
+    "join",
+    "slice",
+    "includes",
+    "indexOf",
+  ],
+  string: [
+    "includes",
+    "slice",
+    "split",
+    "trim",
+    "toUpperCase",
+    "toLowerCase",
+    "startsWith",
+    "endsWith",
+  ],
+  number: ["toFixed"],
+} as const;
+
+/** Read-only properties allowed on lists and strings (plain objects allow any own key). */
+export const PROPERTIES = { list: ["length"], string: ["length"] } as const;
+
+/** Property names that are always rejected, on every receiver. */
+export const FORBIDDEN_PROPERTIES = [
+  "__proto__",
+  "prototype",
+  "constructor",
+] as const;
+
+/** Resource limits enforced by compile/evaluate. */
+export const LIMITS = {
+  sourceChars: 20_000,
+  /** Interpreter steps per evaluate() call. */
+  steps: 200_000,
+  /** UiNodes produced per evaluate() call. */
+  nodes: 2_000,
+  /** Elements in any list produced or iterated. */
+  listLength: 1_000,
+  /**
+   * Elements in any list of a loaded file. Reports (SARIF results, Ruff, a HAR)
+   * pass 1,000 often and go to a component whole; iterating one in the spec
+   * (`.map`, `.filter`, …) is still capped at listLength.
+   */
+  loadedListLength: 20_000,
+} as const;

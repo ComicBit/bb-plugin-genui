@@ -1,0 +1,8 @@
+$audience = "Everyone"
+$channels = []
+$notes = ""
+Card("A few questions first", [Form([
+  Choice($audience, ["Everyone", "Waitlist", "Beta testers"], label: "Who should get it?"),
+  Checklist($channels, ["Email", "Push", "In-app"], label: "Which channels?"),
+  TextArea($notes, label: "Anything else?")
+], submit: "Send answers")])

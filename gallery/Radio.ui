@@ -1,0 +1,5 @@
+$plan = "monthly"
+Card("How often should we bill you?", [
+  Radio($plan, [{value: "monthly", detail: "Cancel any time"}, {value: "yearly", detail: "Two months free"}, {value: "lifetime", detail: "One payment"}]),
+  Button("Continue with " + $plan, Send("Bill me " + $plan), variant: "primary")
+])

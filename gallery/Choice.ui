@@ -1,0 +1,8 @@
+$seats = 10
+$plan = "Pro"
+price = $plan == "Pro" ? 29 : 12
+Card("Estimate", [
+  Row([Choice($plan, ["Basic", "Pro"]), Slider($seats, 1, 50, label: "Seats")]),
+  Metric("Total", "$" + fmt(price * $seats), tone: "good"),
+  Button("Go with " + $plan, Send("Go with " + $plan))
+])

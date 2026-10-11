@@ -1,0 +1,5 @@
+$notes = ""
+Card("Anything the reviewer should know?", [
+  TextArea($notes, label: "Notes", placeholder: "Context, risks, screenshots to check"),
+  Button("Add to the PR", Send("Add to the PR description: " + $notes))
+])
