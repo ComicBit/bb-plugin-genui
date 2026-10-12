@@ -7,18 +7,32 @@ export interface OutlineItem {
   readonly role: "assistant" | "user";
 }
 
+/** A user row's event sequence, from its `<thread>:user-seed:<seq>` id; null for any other id. */
+function userSeq(id: string): number | null {
+  const match = /:user-seed:(\d+)$/.exec(id);
+  return match === null ? null : Number(match[1]);
+}
+
 /**
  * Whether a user message follows the message `anchorId` (the assistant reply
  * holding a block). Null when the anchor is not in the outline, so the
  * caller can keep what it knew: a nested agent's message, or a reply the
  * outline no longer lists.
+ *
+ * A user row whose sequence is below one already seen is out of place, not a
+ * reply: BB's outline can list a rejected steer, sent long before, at its end.
  */
 export function hasLaterUserMessage(items: readonly OutlineItem[] | null, anchorId: string): boolean | null {
   if (items === null) return null;
   const anchor = items.findIndex((item) => item.id === anchorId);
   if (anchor === -1) return null;
-  for (let index = anchor + 1; index < items.length; index += 1) {
-    if (items[index]?.role === "user") return true;
+  let highest = -1;
+  for (const [index, item] of items.entries()) {
+    if (item.role !== "user") continue;
+    const seq = userSeq(item.id);
+    if (seq !== null && seq < highest) continue;
+    if (index > anchor) return true;
+    if (seq !== null) highest = seq;
   }
   return false;
 }

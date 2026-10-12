@@ -81,7 +81,9 @@ The internals behind [the README](../README.md): how agents learn the language, 
    user message after the reply (typed, or sent from anywhere), they go away.
    `ui/useSuperseded.ts` reads that from BB's conversation outline and
    re-reads it only on thread events that can add a user message, so it
-   holds for blocks BB has scrolled out of its timeline. Copy and link
+   holds for blocks BB has scrolled out of its timeline. A user row whose
+   sequence is below one already listed doesn't count: BB's outline can put
+   an old rejected steer at its end (`ui/supersession.ts`). Copy and link
    buttons stay. A `Form` sends every field as one `label: value` message
    (`core/form.ts`) and then turns read-only.
 7. A state declared with the wrong but losslessly convertible type

@@ -33,6 +33,12 @@ describe("hasLaterUserMessage", () => {
     expect(hasLaterUserMessage([{ id: "u1", role: "user" }, { id: "a1", role: "assistant" }], "a1")).toBe(false);
   });
 
+  it("ignores a user row listed out of sequence, like BB's rejected steer at the end", () => {
+    const stale: OutlineItem = { id: "thr_a:user-seed:30", role: "user" };
+    expect(hasLaterUserMessage([...OUTLINE, stale], LATEST)).toBe(false);
+    expect(hasLaterUserMessage([...OUTLINE, stale, { id: "thr_a:user-seed:50", role: "user" }], LATEST)).toBe(true);
+  });
+
   it("is unknown when the outline is not loaded or lacks the reply", () => {
     expect(hasLaterUserMessage(null, ASK)).toBeNull();
     expect(hasLaterUserMessage(OUTLINE, "thr_a:assistant:nested")).toBeNull();
