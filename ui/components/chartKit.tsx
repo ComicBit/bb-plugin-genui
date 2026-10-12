@@ -13,7 +13,8 @@ import {
   type SVGProps,
 } from "react";
 import { cn } from "@/lib/utils";
-import { ACCENT, finiteNumber, formatNumber, isObject, type Tone } from "../values";
+import { ACCENT, finiteNumber, formatNumber, isObject, tone, type Tone } from "../values";
+import type { Value } from "../../core/types";
 import { CHART_DRAW_MS, EASE_OUT_EXPO, FADE, useEntrance, type Entrance } from "./motion";
 
 /** Series colors in order: the accent, its quiet counterpart, then the tones. */
@@ -129,11 +130,16 @@ export function readSeries(value: unknown): Series[] {
     : isObject(value)
       ? Object.entries(value)
       : [];
-  return entries.flatMap(([name, values], index) =>
-    Array.isArray(values)
-      ? [{ name, values: values.map(finiteNumber), color: PALETTE[index % PALETTE.length] }]
-      : [],
-  );
+  return entries.flatMap(([name, entry], index) => {
+    const toned = isObject(entry) && Array.isArray(entry.values);
+    const values = toned ? entry.values : entry;
+    if (!Array.isArray(values)) return [];
+    const color =
+      toned && entry.tone !== undefined
+        ? TONE_STROKE[tone(entry.tone as Value)]
+        : PALETTE[index % PALETTE.length]!;
+    return [{ name, values: values.map(finiteNumber), color }];
+  });
 }
 
 /**

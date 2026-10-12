@@ -155,7 +155,7 @@ export const COMPONENTS = {
       { name: "unit", kind: "string", optional: true },
       { name: "stacked", kind: "boolean", optional: true },
     ],
-    summary: "series: numbers or {name: numbers}; scatter: labels are the x values; heatmap: one series per row",
+    summary: "series: numbers or {name: numbers | {values, tone}}; scatter: labels are the x values; heatmap: one series per row",
   },
   Sparkline: {
     group: "Data",
