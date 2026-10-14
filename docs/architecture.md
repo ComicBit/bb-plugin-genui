@@ -121,6 +121,13 @@ The internals behind [the README](../README.md): how agents learn the language, 
      host in its link, through a proxy that refuses loopback, private,
      link-local and other non-public addresses (checked on the connected
      address and on every redirect), non-image bytes and files over 5 MB.
+   A local resolver that answers with fake addresses (Surge in Enhanced
+   Mode, Clash in TUN mode: `198.18.0.0/15`) makes every one of those
+   lookups fail, since the guard reads the fake address as not public. The
+   `webLookupsFakeIp` setting (off by default) allows that one range — the
+   addresses are unroutable and the resolver maps them back to the hostname
+   and connects itself — while every other refusal stands; a second
+   connection pool holds it, so the two policies never share a socket.
    Each service sees this machine's IP address, the request and a
    User-Agent naming the plugin; no cookies, thread text or account
    details. Answers are cached in the plugin's own database (up to 128 MB).

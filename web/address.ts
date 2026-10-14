@@ -34,16 +34,32 @@ const SPECIAL_V6: readonly (readonly [string, number])[] = [
   ["3fff::", 20], // documentation
 ];
 
+/**
+ * The range a local fake-IP resolver answers with: Surge Enhanced Mode and
+ * Clash TUN reply to every A query from `198.18.0.0/15` and map an address in
+ * it back to the hostname themselves. Those addresses are unroutable, so a
+ * connection to one goes to the local resolver and not to a host here — the
+ * `webLookupsFakeIp` setting allows them, one range at a time.
+ */
+const FAKE_IP_V4: readonly (readonly [string, number])[] = [["198.18.0.0", 15]];
+
 const privateV4 = new BlockList();
 for (const [network, prefix] of PRIVATE_V4) privateV4.addSubnet(network, prefix, "ipv4");
+const fakeV4 = new BlockList();
+for (const [network, prefix] of FAKE_IP_V4) fakeV4.addSubnet(network, prefix, "ipv4");
 const globalV6 = new BlockList();
 globalV6.addSubnet("2000::", 3, "ipv6");
 const specialV6 = new BlockList();
 for (const [network, prefix] of SPECIAL_V6) specialV6.addSubnet(network, prefix, "ipv6");
 
+/** The address without the brackets an IPv6 URL wraps it in. */
+function bareAddress(address: string): string {
+  return address.startsWith("[") && address.endsWith("]") ? address.slice(1, -1) : address;
+}
+
 /** True only for a literal IP address on the public internet. */
 export function isPublicAddress(address: string): boolean {
-  const bare = address.startsWith("[") && address.endsWith("]") ? address.slice(1, -1) : address;
+  const bare = bareAddress(address);
   // A zone index (fe80::1%en0) only exists on link-local addresses.
   if (bare.includes("%")) return false;
   switch (isIP(bare)) {
@@ -54,4 +70,15 @@ export function isPublicAddress(address: string): boolean {
     default:
       return false;
   }
+}
+
+/**
+ * True for an address a fetch may connect to: the public internet, plus — only
+ * when the user has allowed it — the local resolver's fake-IP range. Nothing
+ * else opens up with `allowsFakeIp`, so the rest of the guard keeps its value.
+ */
+export function isConnectableAddress(address: string, allowsFakeIp: boolean): boolean {
+  if (isPublicAddress(address)) return true;
+  const bare = bareAddress(address);
+  return allowsFakeIp && !bare.includes("%") && isIP(bare) === 4 && fakeV4.check(bare, "ipv4");
 }

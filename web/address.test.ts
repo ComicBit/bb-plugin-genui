@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isPublicAddress } from "./address";
+import { isConnectableAddress, isPublicAddress } from "./address";
 import { refusal } from "./net";
 
 describe("isPublicAddress", () => {
@@ -41,6 +41,27 @@ describe("isPublicAddress", () => {
   );
 });
 
+describe("isConnectableAddress", () => {
+  it.each(["198.18.0.0", "198.18.0.1", "198.18.44.124", "198.19.255.255", "[198.18.44.124]"])(
+    "allows the fake-IP range %s only when the caller allows it",
+    (address) => {
+      expect(isConnectableAddress(address, true)).toBe(true);
+      expect(isConnectableAddress(address, false)).toBe(false);
+    },
+  );
+
+  it("opens up that range and nothing else", () => {
+    for (const address of ["127.0.0.1", "10.1.2.3", "192.168.1.1", "169.254.169.254", "::1", "fd00::1", "::ffff:198.18.44.124"]) {
+      expect(isConnectableAddress(address, true)).toBe(false);
+    }
+    expect(isConnectableAddress("198.18.44.124%en0", true)).toBe(false);
+    expect(isConnectableAddress("8.8.8.8", false)).toBe(true);
+    expect(isConnectableAddress("8.8.8.8", true)).toBe(true);
+    // Outside the range, the public-address answer stands on its own.
+    expect(isConnectableAddress("198.20.0.1", false)).toBe(true);
+  });
+});
+
 describe("refusal", () => {
   it.each([
     ["http://example.com/a.png", "only https links can be fetched"],
@@ -56,5 +77,13 @@ describe("refusal", () => {
   it("allows public https hosts on the default port", () => {
     expect(refusal(new URL("https://upload.wikimedia.org/a.jpg"))).toBeNull();
     expect(refusal(new URL("https://example.com:443/a.jpg"))).toBeNull();
+  });
+
+  it("refuses a fake-IP address unless the caller allows it", () => {
+    expect(refusal(new URL("https://198.18.44.124/a.png"))).toBe("198.18.44.124 is not on the public internet");
+    expect(refusal(new URL("https://198.18.44.124/a.png"), true)).toBeNull();
+    // The rest of the guard is not a setting.
+    expect(refusal(new URL("https://127.0.0.1/a.png"), true)).toBe("127.0.0.1 is not on the public internet");
+    expect(refusal(new URL("http://198.18.44.124/a.png"), true)).toBe("only https links can be fetched");
   });
 });
