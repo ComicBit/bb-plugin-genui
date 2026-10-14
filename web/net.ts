@@ -10,7 +10,7 @@ import type { IncomingHttpHeaders } from "node:http";
 import { Agent, request } from "node:https";
 import { isIP, type LookupFunction } from "node:net";
 import { brotliDecompressSync, gunzipSync, inflateSync } from "node:zlib";
-import { isConnectableAddress, isPublicAddress, rangesKey, type AllowedRange } from "./address";
+import { isConnectableAddress, rangesKey, type AllowedRange } from "./address";
 
 /** Names this plugin to every service, as their usage policies require. */
 export const USER_AGENT = "bb-plugin-genui/0.1 (Generative UI plugin for bb; https://getbb.app)";

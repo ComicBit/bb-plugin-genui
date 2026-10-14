@@ -40,14 +40,14 @@ export const WEB_SETTINGS = {
     type: "boolean",
     label: "Reach local fake IP addresses",
     description:
-      "Turn this on only when a local DNS resolver answers with fake addresses, which leaves maps, place names and photos blank: Surge in Enhanced Mode and Clash in TUN mode reply to every lookup from an unroutable range, and this plugin refuses those addresses as not on the public internet. On, the standard pool (198.18.0.0/15) is allowed, plus whatever 'Extra fake IP ranges' lists. The addresses are unroutable and the resolver maps one back to the hostname and connects, so nothing local is reachable: localhost, this machine's network, its routers and metadata endpoints stay refused, and an https link naming a private address is still refused. Off means those lookups keep failing, with no message. Turn it back off if you stop using such a resolver.",
+      "Turn this on only when a local DNS resolver answers with fake addresses, which leaves maps, place names and photos blank: Surge in Enhanced Mode and Clash in TUN mode reply to every lookup from an unroutable range, and this plugin refuses those addresses as not on the public internet. On, the standard pool (198.18.0.0/15) is allowed, plus whatever 'Extra fake IP ranges' lists. Each listed range is an exception to the address check, so list exactly what the resolver reports and nothing wider: an address in it is connected to, and a resolver that forwards a name elsewhere than it says is beyond what this check can see. Loopback, private, link-local, unique-local, multicast, NAT64 and IPv4-mapped ranges are refused however they are written, and a range reaching into one of those is refused whole, so no listing reaches this machine or its network. Off means those lookups keep failing, with a line above the map saying why. Turn it back off if you stop using such a resolver.",
     default: false,
   },
   webLookupsFakeIpRanges: {
     type: "string",
     label: "Extra fake IP ranges",
     description:
-      "Only read when 'Reach local fake IP addresses' is on, and only to add ranges the standard pool does not cover: Clash (dns.fake-ip-range, default 198.18.0.1/16) and sing-box (inet4_range / inet6_range) let the range be changed, and some resolvers answer IPv6 fake addresses from a unique-local range. Comma-, space- or newline-separated CIDRs, for example: 28.0.0.0/8, fd00:6152::/48. List exactly the range the resolver reports and no wider: everything listed becomes reachable through it. Loopback, private, link-local, multicast, NAT64 and IPv4-mapped ranges are refused however they are written, and a range that reaches into one of those is refused whole. An entry that is not a CIDR is ignored, with a line in the plugin log.",
+      "Only read when 'Reach local fake IP addresses' is on, and only to add ranges the standard pool does not cover: Clash (dns.fake-ip-range, default 198.18.0.1/16) and sing-box (inet4_range) let the range be changed. Comma-, space- or newline-separated CIDRs, or a single address, which is read as one host: 28.0.0.0/8, 28.0.0.1. A resolver whose fake pool sits in a unique-local IPv6 range (sing-box's default inet6_range is fc00::/18) cannot be supported here: unique-local addresses name hosts on this network, so they stay refused and the map keeps failing. An entry that is not a range is ignored, with a line in the plugin log.",
     experimental_multiline: true,
     default: "",
   },
@@ -155,9 +155,9 @@ export function createWebLookups(bb: BbPluginApi): WebLookups {
   const enabled = async () => (await settings.get()).webLookups;
   let on: boolean = WEB_SETTINGS.webLookups.default;
   /**
-   * The ranges a fetch may reach besides the public internet, read at request
-   * time so a settings change applies to the next lookup. Empty while the
-   * setting is off.
+   * The ranges a fetch may reach besides the public internet, read from the
+   * settings events below so the next lookup uses the current list. Empty while
+   * the setting is off.
    */
   let extraRanges: readonly AllowedRange[] = [];
   const readPolicy = (current: { readonly webLookupsFakeIp: boolean; readonly webLookupsFakeIpRanges: string }) => {

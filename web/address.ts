@@ -63,7 +63,9 @@ const NEVER_V6: readonly (readonly [string, number])[] = [
   ["::", 128], // unspecified
   ["::1", 128], // loopback
   ["::ffff:0:0", 96], // IPv4-mapped: would name an IPv4 address under another spelling
-  ["64:ff9b::", 96], // NAT64: the same, with an embedded IPv4 address
+  ["64:ff9b::", 96], // NAT64 well-known prefix: an embedded IPv4 address
+  ["64:ff9b:1::", 48], // RFC 8215 local-use NAT64, which exists to reach private IPv4 addresses
+  ["fc00::", 7], // unique-local: RFC 4193 addresses name hosts on this network, like RFC1918 does
   ["2001::", 23], // IETF protocol assignments (Teredo tunnels to an embedded IPv4 address)
   ["2002::", 16], // 6to4: the same
   ["fe80::", 10], // link-local
@@ -75,6 +77,10 @@ const NEVER_V6: readonly (readonly [string, number])[] = [
  * tools that let it be changed (Clash, sing-box). Unroutable on the public
  * internet, so a connection to one goes to the local resolver, which maps it
  * back to the hostname and connects itself.
+ *
+ * A resolver whose fake pool sits in a range `NEVER_V4`/`NEVER_V6` names — a
+ * unique-local range, say — cannot be supported: those ranges also name hosts
+ * on this network, and the setting may not open them.
  */
 export const STANDARD_FAKE_RANGES: readonly AllowedRange[] = [{ network: "198.18.0.0", prefix: 15, family: 4 }];
 
@@ -97,7 +103,7 @@ function bareAddress(address: string): string {
 /** True only for a literal IP address on the public internet. */
 export function isPublicAddress(address: string): boolean {
   const bare = bareAddress(address);
-  // A zone index (fe80::1%en0) only exists on link-local addresses.
+  // A scoped address (fe80::1%en0) names an interface on this machine, wherever it sits.
   if (bare.includes("%")) return false;
   switch (isIP(bare)) {
     case 4:
@@ -166,9 +172,9 @@ const neverSpans: readonly { readonly family: 4 | 6; readonly start: bigint; rea
 
 /**
  * Reads the `webLookupsFakeIpRanges` setting: comma-, space- or newline-separated
- * CIDRs, or bare addresses (`28.0.0.0/8` or `28.0.0.1`). Entries that are not a
- * CIDR, or that reach into `NEVER_V4`/`NEVER_V6`, come back in `rejected` and
- * are never allowed.
+ * CIDRs (`28.0.0.0/8`), or a single address (`28.0.0.1`), which is read as one
+ * host. Entries that are not a range, or that reach into `NEVER_V4`/`NEVER_V6`,
+ * come back in `rejected` and are never allowed.
  */
 export function parseRanges(text: string): { readonly ranges: readonly AllowedRange[]; readonly rejected: readonly string[] } {
   const ranges: AllowedRange[] = [];
@@ -203,7 +209,7 @@ export function isConnectableAddress(address: string, extra: readonly AllowedRan
   if (isPublicAddress(address)) return true;
   if (extra.length === 0) return false;
   const bare = bareAddress(address);
-  // A zone index (fe80::1%en0) only exists on link-local addresses.
+  // A scoped address (fe80::1%en0) names an interface on this machine, wherever it sits.
   if (bare.includes("%")) return false;
   return evaluatorFor(extra)(bare);
 }
@@ -237,7 +243,11 @@ function evaluatorFor(extra: readonly AllowedRange[]): (address: string) => bool
   return allows;
 }
 
-/** A stable name for a set of ranges, for the cache above and for connection pools. */
+/**
+ * A stable name for a set of ranges, for the cache above and for connection
+ * pools. Two policies never share a pool, so a set that differs in any way -
+ * order, repeats, spelling - is a different key and gets its own.
+ */
 export function rangesKey(extra: readonly AllowedRange[]): string {
   return extra.map((range) => `${range.network}/${range.prefix}`).join(",");
 }
