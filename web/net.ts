@@ -1,14 +1,16 @@
 // The plugin's one way onto the network: GET over https to public addresses
-// only. Every hop of a redirect is checked again, and the address check runs
-// inside the connection's own DNS lookup, so the address that was checked is
-// the address connected to (no DNS-rebinding window). Bodies are capped and
-// requests time out; failures are values with a short reason, never throws.
+// only — plus, when the user allows it (`webLookupsFakeIp`), the fake range a
+// local resolver answers from. Every hop of a redirect is checked again, and
+// the address check runs inside the connection's own DNS lookup, so the
+// address that was checked is the address connected to (no DNS-rebinding
+// window). Bodies are capped and requests time out; failures are values with a
+// short reason, never throws.
 import { lookup as dnsLookup, type LookupAddress } from "node:dns";
 import type { IncomingHttpHeaders } from "node:http";
 import { Agent, request } from "node:https";
 import { isIP, type LookupFunction } from "node:net";
 import { brotliDecompressSync, gunzipSync, inflateSync } from "node:zlib";
-import { isPublicAddress } from "./address";
+import { isConnectableAddress, rangesKey, type AllowedRange } from "./address";
 
 /** Names this plugin to every service, as their usage policies require. */
 export const USER_AGENT = "bb-plugin-genui/0.1 (Generative UI plugin for bb; https://getbb.app)";
@@ -25,6 +27,12 @@ export interface GetOptions {
   readonly timeoutMs: number;
   /** Extra request headers (conditional-request validators). */
   readonly headers?: Readonly<Record<string, string>>;
+  /**
+   * Ranges a local resolver's fake addresses may come from (the
+   * `webLookupsFakeIp` setting). They are unroutable: the resolver maps one
+   * back to the hostname and connects on our behalf.
+   */
+  readonly extraRanges?: readonly AllowedRange[];
 }
 
 export type Fetched =
@@ -41,32 +49,60 @@ export type Fetched =
 
 class Refused extends Error {}
 
-/** Resolves like dns.lookup, but fails unless every address is public. */
-const publicLookup = ((hostname: string, options: { all?: boolean }, callback: (...args: unknown[]) => void) => {
-  dnsLookup(hostname, { all: true, verbatim: true }, (error, addresses: LookupAddress[]) => {
-    if (error) {
-      callback(error);
-      return;
-    }
-    if (addresses.length === 0 || addresses.some((entry) => !isPublicAddress(entry.address))) {
-      callback(new Refused(`${hostname} is not on the public internet`));
-      return;
-    }
-    if (options.all) callback(null, addresses);
-    else callback(null, addresses[0].address, addresses[0].family);
-  });
-}) as unknown as LookupFunction;
+/** Resolves like dns.lookup, but fails unless every address is connectable. */
+function addressLookup(extra: readonly AllowedRange[]): LookupFunction {
+  return ((hostname: string, options: { all?: boolean }, callback: (...args: unknown[]) => void) => {
+    dnsLookup(hostname, { all: true, verbatim: true }, (error, addresses: LookupAddress[]) => {
+      if (error) {
+        callback(error);
+        return;
+      }
+      if (addresses.length === 0 || addresses.some((entry) => !isConnectableAddress(entry.address, extra))) {
+        callback(new Refused(`${hostname} is not on the public internet`));
+        return;
+      }
+      if (options.all) callback(null, addresses);
+      else callback(null, addresses[0].address, addresses[0].family);
+    });
+  }) as unknown as LookupFunction;
+}
 
-const agent = new Agent({ keepAlive: true, maxSockets: 6, lookup: publicLookup });
+/** One connection pool with its own address policy. */
+function transport(extra: readonly AllowedRange[]) {
+  const lookup = addressLookup(extra);
+  return { lookup, agent: new Agent({ keepAlive: true, maxSockets: 6, lookup }) };
+}
+
+/**
+ * A pool per set of ranges, so two policies never share a keep-alive socket.
+ * Only settings changes make new sets; the oldest pool is closed when the
+ * table outgrows a handful.
+ */
+const transports = new Map<string, ReturnType<typeof transport>>([[rangesKey([]), transport([])]]);
+
+function transportFor(options: GetOptions) {
+  const extra = options.extraRanges ?? [];
+  const key = rangesKey(extra);
+  const known = transports.get(key);
+  if (known !== undefined) return known;
+  const built = transport(extra);
+  if (transports.size >= 8) {
+    const oldest = transports.keys().next().value;
+    if (oldest !== undefined) transports.get(oldest)?.agent.destroy();
+    if (oldest !== undefined) transports.delete(oldest);
+  }
+  transports.set(key, built);
+  return built;
+}
 
 /** Why `url` may not be fetched, or null when it may. */
-export function refusal(url: URL): string | null {
+export function refusal(url: URL, extraRanges: readonly AllowedRange[] = []): string | null {
   if (url.protocol !== "https:") return "only https links can be fetched";
   if (url.username !== "" || url.password !== "") return "links with credentials can't be fetched";
   if (url.port !== "") return "only the standard https port is allowed";
   const host = url.hostname.startsWith("[") ? url.hostname.slice(1, -1) : url.hostname;
   if (host === "") return "the link has no host";
-  if (isIP(host) !== 0 && !isPublicAddress(host)) return `${host} is not on the public internet`;
+  if (isIP(host) !== 0 && !isConnectableAddress(host, extraRanges)) return `${host} is not on the public internet`;
   return null;
 }
 
@@ -105,6 +141,7 @@ function decode(body: Buffer, encoding: string | undefined, maxBytes: number): B
 }
 
 function hop(url: URL, options: GetOptions, deadline: AbortSignal): Promise<Hop> {
+  const transport = transportFor(options);
   return new Promise((resolve) => {
     let settled = false;
     const settle = (result: Hop) => {
@@ -117,8 +154,8 @@ function hop(url: URL, options: GetOptions, deadline: AbortSignal): Promise<Hop>
       url,
       {
         method: "GET",
-        agent,
-        lookup: publicLookup,
+        agent: transport.agent,
+        lookup: transport.lookup,
         signal: deadline,
         timeout: IDLE_MS,
         headers: {
@@ -186,7 +223,7 @@ export async function safeGet(input: string, options: GetOptions): Promise<Fetch
   }
   const deadline = AbortSignal.timeout(options.timeoutMs);
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
-    const refused = refusal(url);
+    const refused = refusal(url, options.extraRanges ?? []);
     if (refused !== null) return { ok: false, error: refused };
     const result = await hop(url, options, deadline);
     if (result.kind === "failed") return { ok: false, error: result.error };

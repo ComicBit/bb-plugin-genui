@@ -16,7 +16,7 @@ Once the plugin is on, agents in the threads you read learn the components and p
 
 - BB 0.45 or later.
 - About 4,000 tokens of instructions in each session whose replies you read. Worker threads that agents spawn get none.
-- Web lookups, on by default and switchable in the plugin's settings: photo search on Wikimedia Commons, place names through Photon and map tiles from OpenStreetMap. These services see your IP address and what is looked up.
+- Web lookups, on by default and switchable in the plugin's settings: photo search on Wikimedia Commons, place names through Photon and map tiles from OpenStreetMap. These services see your IP address and what is looked up. Addresses are checked before every connection, so a link can't reach this machine's network; a second setting exempts the fake range a local resolver answers with (`198.18.0.0/15`, plus any range listed), which is an exception to that check and nothing more. A map that cannot fetch or decode a tile says so in one line above itself.
 - Components read files only from the thread's workspace, its thread storage and /tmp.
 - BB has no plugin slot for code blocks yet, so the plugin draws over BB's own. A BB update can show the blocks as code until the plugin catches up.
 

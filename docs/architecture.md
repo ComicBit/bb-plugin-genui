@@ -121,6 +121,27 @@ The internals behind [the README](../README.md): how agents learn the language, 
      host in its link, through a proxy that refuses loopback, private,
      link-local and other non-public addresses (checked on the connected
      address and on every redirect), non-image bytes and files over 5 MB.
+   A local resolver that answers with fake addresses (Surge in Enhanced
+   Mode, Clash in TUN mode, sing-box) makes every one of those lookups fail,
+   since the guard reads the fake address as not public. The
+   `webLookupsFakeIp` setting (off by default) allows the standard pool,
+   `198.18.0.0/15`, and `webLookupsFakeIpRanges` adds any others — Clash
+   (`dns.fake-ip-range`) and sing-box (`inet4_range`) let the range be
+   changed. Listed ranges are parsed once per settings change and checked
+   twice: `parseRanges` drops an entry that is not a range or that reaches
+   into `NEVER_V4`/`NEVER_V6` (loopback, private, unique-local, link-local,
+   multicast, NAT64, IPv4-mapped, 6to4, Teredo), and `isConnectableAddress`
+   applies those same lists to the address actually connected to. A
+   resolver whose fake pool sits in one of those ranges — sing-box's default
+   `inet6_range` is `fc00::/18` — cannot be supported: those addresses name
+   hosts on this network, so they stay refused. Each set of ranges gets its
+   own connection pool, retired (not destroyed under it) when the table
+   outgrows a handful, so two policies never share a socket.
+   What the guard checks is the address the plugin's own socket connects to.
+   A resolver that maps a name back to a hostname and then forwards that name
+   somewhere else is past what any address check here can see; the exception
+   is a narrowing of that check, not a statement about a proxy's final
+   destination.
    Each service sees this machine's IP address, the request and a
    User-Agent naming the plugin; no cookies, thread text or account
    details. Answers are cached in the plugin's own database (up to 128 MB).

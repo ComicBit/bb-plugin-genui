@@ -4,7 +4,7 @@
 // wheel, double click, buttons and keys, and can join the places in order
 // with a route line. No map library: the projection and tiling are
 // mapMath.ts, tiles and place names come through the backend (web/lookups.ts).
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { UrlLink, useRpc } from "@get-bb/plugin-sdk/app";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,7 @@ import { ACCENT, finiteNumber, isObject, list, optionalText, type Props } from "
 import { useDarkTheme } from "../theme";
 import { cachedTile, geocode, loadTile, type PlaceResult } from "../webLookups";
 import { ErrorLine } from "./display";
+import { basemapMessage, basemapReducer, NO_BASEMAP } from "./mapBasemap";
 import { WebOffLine } from "./media";
 import {
   clampView,
@@ -114,7 +115,28 @@ function useLookups(places: readonly (Place | null)[]): ReadonlyMap<string, Plac
 const REDUCED_MOTION = matchMedia("(prefers-reduced-motion: reduce)");
 
 /** One map tile: fetched when drawn, faded in once decoded. */
-function MapTile({ z, x, y, left, top, size, onOff }: { z: number; x: number; y: number; left: number; top: number; size: number; onOff: () => void }) {
+function MapTile({
+  z,
+  x,
+  y,
+  left,
+  top,
+  size,
+  onOff,
+  onArrived,
+  onFailed,
+}: {
+  z: number;
+  x: number;
+  y: number;
+  left: number;
+  top: number;
+  size: number;
+  onOff: () => void;
+  /** The tile is in hand: the level on screen may be complete now. */
+  onArrived: () => void;
+  onFailed: (error: string) => void;
+}) {
   const rpc = useRpc<typeof rpcContract>();
   const key = `${z}/${x}/${y}`;
   const [url, setUrl] = useState<{ readonly key: string; readonly url: string } | null>(() => {
@@ -127,13 +149,17 @@ function MapTile({ z, x, y, left, top, size, onOff }: { z: number; x: number; y:
     let live = true;
     void loadTile(rpc, z, x, y).then((result) => {
       if (!live) return;
-      if (result.ok) setUrl({ key, url: result.dataUrl });
-      else if (result.off === true) onOff();
+      if (result.ok) {
+        setUrl({ key, url: result.dataUrl });
+        onArrived();
+      } else if (result.off === true) onOff();
+      // Without this the tile simply never appears, and the map looks broken with no reason given.
+      else onFailed(result.error);
     });
     return () => {
       live = false;
     };
-  }, [rpc, z, x, y, key, url, onOff]);
+  }, [rpc, z, x, y, key, url, onOff, onArrived, onFailed]);
   if (url?.key !== key) return null;
   return (
     <img
@@ -141,6 +167,8 @@ function MapTile({ z, x, y, left, top, size, onOff }: { z: number; x: number; y:
       alt=""
       draggable={false}
       onLoad={() => setShown(true)}
+      // A tile that will not decode is as missing as one that never came.
+      onError={() => onFailed("the tile image could not be read")}
       className={cn("absolute max-w-none select-none transition-opacity duration-200 motion-reduce:transition-none", shown ? "opacity-100" : "opacity-0")}
       // Half a pixel of overlap hides seams between fractional-zoom tiles.
       style={{ left: Math.floor(left), top: Math.floor(top), width: Math.ceil(size) + 1, height: Math.ceil(size) + 1 }}
@@ -189,6 +217,8 @@ export function MapView({ props }: { props: Props }) {
   const [size, setSize] = useState<Size | null>(null);
   const [view, setView] = useState<View | null>(null);
   const [tilesOff, setTilesOff] = useState(false);
+  /** Why the basemap is missing; the rule lives in mapBasemap.ts. */
+  const [basemap, noteBasemap] = useReducer(basemapReducer, NO_BASEMAP);
   const [hovered, setHovered] = useState<number | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   /** The level whose tiles finished loading last: drawn as a backdrop while another loads. */
@@ -398,12 +428,19 @@ export function MapView({ props }: { props: Props }) {
 
   const z = view === null ? null : tileZoom(view);
   const tiles = view === null || size === null ? [] : visibleTiles(view, size);
-  // Remember the level once its tiles are all on the page, for the next zoom's backdrop.
+  /** Every tile of the level on screen is on the page: the basemap is drawn. */
+  const tilesReady = z !== null && tiles.length > 0 && tiles.every((tile) => cachedTile(tile.z, tile.x, tile.y) !== null);
   useEffect(() => {
-    if (z === null || tiles.length === 0) return;
-    if (tiles.every((tile) => cachedTile(tile.z, tile.x, tile.y) !== null)) setBackdropZ(z);
-  });
+    if (!tilesReady || z === null) return;
+    // Remember the level for the next zoom's backdrop, and drop a failure that has passed.
+    setBackdropZ(z);
+    noteBasemap({ kind: "level-loaded" });
+    // `arrivals` is what brings the effect back here when a tile lands.
+  }, [tilesReady, z, basemap.arrivals]);
   const onTilesOff = useCallback(() => setTilesOff(true), []);
+  const onTileArrived = useCallback(() => noteBasemap({ kind: "tile-arrived" }), []);
+  const onTileFailed = useCallback((error: string) => noteBasemap({ kind: "tile-failed", error }), []);
+  const basemapError = basemapMessage(basemap);
 
   if (items.length === 0) return <ErrorLine message="Map needs places: {name, lat?, lng?, note?}" />;
   const unnamed = places.findIndex((place, index) => place === null && index < places.length - 1);
@@ -423,6 +460,7 @@ export function MapView({ props }: { props: Props }) {
     // Tiles are not pictures to preview: keep image-preview plugins off them.
     <div ref={rise} data-bb-image-preview-ignore="" className="@container min-w-0">
       {unnamed === -1 ? null : <ErrorLine message={`Map place ${unnamed + 1} needs a name`} />}
+      {basemapError === null || off ? null : <ErrorLine message={basemapError} />}
       <div className={cn("flex min-w-0 flex-col gap-3", !off && "@xl:flex-row @xl:items-start")}>
         {off ? (
           <div className="@xl:flex-1">
@@ -452,7 +490,18 @@ export function MapView({ props }: { props: Props }) {
                 <Backdrop view={view} size={size} z={backdropZ} />
               ) : null}
               {tiles.map((tile) => (
-                <MapTile key={tile.key} z={tile.z} x={tile.x} y={tile.y} left={tile.left} top={tile.top} size={tile.size} onOff={onTilesOff} />
+                <MapTile
+                  key={tile.key}
+                  z={tile.z}
+                  x={tile.x}
+                  y={tile.y}
+                  left={tile.left}
+                  top={tile.top}
+                  size={tile.size}
+                  onOff={onTilesOff}
+                  onArrived={onTileArrived}
+                  onFailed={onTileFailed}
+                />
               ))}
             </div>
             {routeLine === "" ? null : (
