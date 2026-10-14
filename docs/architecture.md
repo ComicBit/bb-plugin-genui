@@ -122,12 +122,18 @@ The internals behind [the README](../README.md): how agents learn the language, 
      link-local and other non-public addresses (checked on the connected
      address and on every redirect), non-image bytes and files over 5 MB.
    A local resolver that answers with fake addresses (Surge in Enhanced
-   Mode, Clash in TUN mode: `198.18.0.0/15`) makes every one of those
-   lookups fail, since the guard reads the fake address as not public. The
-   `webLookupsFakeIp` setting (off by default) allows that one range — the
-   addresses are unroutable and the resolver maps them back to the hostname
-   and connects itself — while every other refusal stands; a second
-   connection pool holds it, so the two policies never share a socket.
+   Mode, Clash in TUN mode, sing-box) makes every one of those lookups fail,
+   since the guard reads the fake address as not public. The
+   `webLookupsFakeIp` setting (off by default) allows the standard pool,
+   `198.18.0.0/15`, and `webLookupsFakeIpRanges` adds any others — Clash
+   (`dns.fake-ip-range`) and sing-box (`inet4_range`/`inet6_range`) let the
+   range be changed, and some resolvers answer IPv6 fake addresses from a
+   unique-local range. Listed ranges are parsed once per settings change and
+   checked twice: `parseRanges` drops an entry that is not a CIDR or that
+   reaches into `NEVER_V4`/`NEVER_V6` (loopback, private, link-local,
+   multicast, NAT64, IPv4-mapped), and `isConnectableAddress` applies those
+   same lists to the address actually connected to. Each set of ranges gets
+   its own connection pool, so two policies never share a socket.
    Each service sees this machine's IP address, the request and a
    User-Agent naming the plugin; no cookies, thread text or account
    details. Answers are cached in the plugin's own database (up to 128 MB).

@@ -10,7 +10,7 @@ import type { IncomingHttpHeaders } from "node:http";
 import { Agent, request } from "node:https";
 import { isIP, type LookupFunction } from "node:net";
 import { brotliDecompressSync, gunzipSync, inflateSync } from "node:zlib";
-import { isConnectableAddress, isPublicAddress } from "./address";
+import { isConnectableAddress, isPublicAddress, rangesKey, type AllowedRange } from "./address";
 
 /** Names this plugin to every service, as their usage policies require. */
 export const USER_AGENT = "bb-plugin-genui/0.1 (Generative UI plugin for bb; https://getbb.app)";
@@ -28,11 +28,11 @@ export interface GetOptions {
   /** Extra request headers (conditional-request validators). */
   readonly headers?: Readonly<Record<string, string>>;
   /**
-   * Connect to the fake addresses a local resolver hands out too (the
-   * `webLookupsFakeIp` setting). The addresses are unroutable: the resolver
-   * maps them back to the hostname and connects on our behalf.
+   * Ranges a local resolver's fake addresses may come from (the
+   * `webLookupsFakeIp` setting). They are unroutable: the resolver maps one
+   * back to the hostname and connects on our behalf.
    */
-  readonly allowsFakeIp?: boolean;
+  readonly extraRanges?: readonly AllowedRange[];
 }
 
 export type Fetched =
@@ -50,14 +50,14 @@ export type Fetched =
 class Refused extends Error {}
 
 /** Resolves like dns.lookup, but fails unless every address is connectable. */
-function addressLookup(allowsFakeIp: boolean): LookupFunction {
+function addressLookup(extra: readonly AllowedRange[]): LookupFunction {
   return ((hostname: string, options: { all?: boolean }, callback: (...args: unknown[]) => void) => {
     dnsLookup(hostname, { all: true, verbatim: true }, (error, addresses: LookupAddress[]) => {
       if (error) {
         callback(error);
         return;
       }
-      if (addresses.length === 0 || addresses.some((entry) => !isConnectableAddress(entry.address, allowsFakeIp))) {
+      if (addresses.length === 0 || addresses.some((entry) => !isConnectableAddress(entry.address, extra))) {
         callback(new Refused(`${hostname} is not on the public internet`));
         return;
       }
@@ -68,25 +68,41 @@ function addressLookup(allowsFakeIp: boolean): LookupFunction {
 }
 
 /** One connection pool with its own address policy. */
-function transport(allowsFakeIp: boolean) {
-  const lookup = addressLookup(allowsFakeIp);
+function transport(extra: readonly AllowedRange[]) {
+  const lookup = addressLookup(extra);
   return { lookup, agent: new Agent({ keepAlive: true, maxSockets: 6, lookup }) };
 }
 
-const transports = { strict: transport(false), fakeIp: transport(true) };
+/**
+ * A pool per set of ranges, so two policies never share a keep-alive socket.
+ * Only settings changes make new sets; the oldest pool is closed when the
+ * table outgrows a handful.
+ */
+const transports = new Map<string, ReturnType<typeof transport>>([[rangesKey([]), transport([])]]);
 
 function transportFor(options: GetOptions) {
-  return options.allowsFakeIp === true ? transports.fakeIp : transports.strict;
+  const extra = options.extraRanges ?? [];
+  const key = rangesKey(extra);
+  const known = transports.get(key);
+  if (known !== undefined) return known;
+  const built = transport(extra);
+  if (transports.size >= 8) {
+    const oldest = transports.keys().next().value;
+    if (oldest !== undefined) transports.get(oldest)?.agent.destroy();
+    if (oldest !== undefined) transports.delete(oldest);
+  }
+  transports.set(key, built);
+  return built;
 }
 
 /** Why `url` may not be fetched, or null when it may. */
-export function refusal(url: URL, allowsFakeIp = false): string | null {
+export function refusal(url: URL, extraRanges: readonly AllowedRange[] = []): string | null {
   if (url.protocol !== "https:") return "only https links can be fetched";
   if (url.username !== "" || url.password !== "") return "links with credentials can't be fetched";
   if (url.port !== "") return "only the standard https port is allowed";
   const host = url.hostname.startsWith("[") ? url.hostname.slice(1, -1) : url.hostname;
   if (host === "") return "the link has no host";
-  if (isIP(host) !== 0 && !isConnectableAddress(host, allowsFakeIp)) return `${host} is not on the public internet`;
+  if (isIP(host) !== 0 && !isConnectableAddress(host, extraRanges)) return `${host} is not on the public internet`;
   return null;
 }
 
@@ -207,7 +223,7 @@ export async function safeGet(input: string, options: GetOptions): Promise<Fetch
   }
   const deadline = AbortSignal.timeout(options.timeoutMs);
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
-    const refused = refusal(url, options.allowsFakeIp === true);
+    const refused = refusal(url, options.extraRanges ?? []);
     if (refused !== null) return { ok: false, error: refused };
     const result = await hop(url, options, deadline);
     if (result.kind === "failed") return { ok: false, error: result.error };

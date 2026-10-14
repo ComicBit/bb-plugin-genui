@@ -8,6 +8,7 @@
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import type Database from "better-sqlite3";
 import { CACHE_MIGRATIONS, WebCache, type CacheEntry } from "./cache";
+import { parseRanges, STANDARD_FAKE_RANGES, type AllowedRange } from "./address";
 import { foundImageSchema, pickImage, searchUrl, type FoundImage } from "./commons";
 import { geocodeUrl, locatedSchema, pickLocation, type Located } from "./geocode";
 import { declaresImage, sniffImage } from "./image";
@@ -39,8 +40,16 @@ export const WEB_SETTINGS = {
     type: "boolean",
     label: "Reach local fake IP addresses",
     description:
-      "Turn this on only when a local DNS resolver answers with fake addresses, which leaves maps, place names and photos blank: Surge in Enhanced Mode and Clash in TUN mode reply to every lookup from 198.18.0.0/15, and this plugin refuses that range as not on the public internet. With the setting on, that one range is allowed; the address is unroutable and the resolver itself maps it back to the hostname and connects, so nothing else is reachable: localhost, this machine's network, its routers and metadata endpoints stay refused, and an https link naming a private address is still refused. Off means those lookups keep failing, with no message. Turn it back off if you stop using such a resolver.",
+      "Turn this on only when a local DNS resolver answers with fake addresses, which leaves maps, place names and photos blank: Surge in Enhanced Mode and Clash in TUN mode reply to every lookup from an unroutable range, and this plugin refuses those addresses as not on the public internet. On, the standard pool (198.18.0.0/15) is allowed, plus whatever 'Extra fake IP ranges' lists. The addresses are unroutable and the resolver maps one back to the hostname and connects, so nothing local is reachable: localhost, this machine's network, its routers and metadata endpoints stay refused, and an https link naming a private address is still refused. Off means those lookups keep failing, with no message. Turn it back off if you stop using such a resolver.",
     default: false,
+  },
+  webLookupsFakeIpRanges: {
+    type: "string",
+    label: "Extra fake IP ranges",
+    description:
+      "Only read when 'Reach local fake IP addresses' is on, and only to add ranges the standard pool does not cover: Clash (dns.fake-ip-range, default 198.18.0.1/16) and sing-box (inet4_range / inet6_range) let the range be changed, and some resolvers answer IPv6 fake addresses from a unique-local range. Comma-, space- or newline-separated CIDRs, for example: 28.0.0.0/8, fd00:6152::/48. List exactly the range the resolver reports and no wider: everything listed becomes reachable through it. Loopback, private, link-local, multicast, NAT64 and IPv4-mapped ranges are refused however they are written, and a range that reaches into one of those is refused whole. An entry that is not a CIDR is ignored, with a line in the plugin log.",
+    experimental_multiline: true,
+    default: "",
   },
 } as const;
 
@@ -145,15 +154,28 @@ export function createWebLookups(bb: BbPluginApi): WebLookups {
 
   const enabled = async () => (await settings.get()).webLookups;
   let on: boolean = WEB_SETTINGS.webLookups.default;
-  /** Read at request time, so a settings change applies to the next lookup. */
-  let allowsFakeIp: boolean = WEB_SETTINGS.webLookupsFakeIp.default;
+  /**
+   * The ranges a fetch may reach besides the public internet, read at request
+   * time so a settings change applies to the next lookup. Empty while the
+   * setting is off.
+   */
+  let extraRanges: readonly AllowedRange[] = [];
+  const readPolicy = (current: { readonly webLookupsFakeIp: boolean; readonly webLookupsFakeIpRanges: string }) => {
+    if (!current.webLookupsFakeIp) {
+      extraRanges = [];
+      return;
+    }
+    const { ranges, rejected } = parseRanges(current.webLookupsFakeIpRanges);
+    for (const entry of rejected) bb.log.warn(`webLookupsFakeIpRanges: “${entry}” is not a range this plugin can allow, and was ignored`);
+    extraRanges = [...STANDARD_FAKE_RANGES, ...ranges];
+  };
   void settings.get().then((current) => {
     on = current.webLookups;
-    allowsFakeIp = current.webLookupsFakeIp;
+    readPolicy(current);
   });
   settings.onChange((next) => {
     on = next.webLookups;
-    allowsFakeIp = next.webLookupsFakeIp;
+    readPolicy(next);
   });
   const images = limiter(4);
   const tiles = limiter(2);
@@ -180,7 +202,7 @@ export function createWebLookups(bb: BbPluginApi): WebLookups {
       const hit = cached(key);
       const hitMime = hit === null ? null : metaOf(hit).mime;
       if (hit !== null && !hit.expired && typeof hitMime === "string") return { ok: true, dataUrl: dataUrl(hitMime, hit.body) };
-      const fetched = await images(() => safeGet(url, { ...imageRequest, allowsFakeIp }));
+      const fetched = await images(() => safeGet(url, { ...imageRequest, extraRanges }));
       if (!fetched.ok) {
         // A stale copy beats an error when the origin is down.
         return hit !== null && typeof hitMime === "string" ? { ok: true, dataUrl: dataUrl(hitMime, hit.body) } : fetched;
@@ -206,7 +228,7 @@ export function createWebLookups(bb: BbPluginApi): WebLookups {
       const parsed = hit === null ? null : foundImageSchema.nullable().safeParse(metaOf(hit).image);
       const remembered = parsed?.success ? parsed.data : null;
       if (hit !== null && !hit.expired && parsed?.success) return remembered === null ? notFound : { ok: true, image: remembered };
-      const fetched: Fetched = await api(() => safeGet(searchUrl(normalized), { ...jsonRequest, allowsFakeIp }));
+      const fetched: Fetched = await api(() => safeGet(searchUrl(normalized), { ...jsonRequest, extraRanges }));
       if (!fetched.ok) return remembered !== null ? { ok: true, image: remembered } : fetched;
       const found: FoundImage | null = pickImage(parseJson(fetched.body));
       store(() => cache.put(key, Buffer.alloc(0), JSON.stringify({ image: found }), found === null ? MISS_TTL_MS : FOUND_TTL_MS));
@@ -230,7 +252,7 @@ export function createWebLookups(bb: BbPluginApi): WebLookups {
       const slot = Math.max(now, nextGeocodeAt);
       nextGeocodeAt = slot + GEOCODE_SPACING_MS;
       if (slot > now) await sleep(slot - now);
-      const fetched = await safeGet(geocodeUrl(normalized, near), { ...jsonRequest, allowsFakeIp });
+      const fetched = await safeGet(geocodeUrl(normalized, near), { ...jsonRequest, extraRanges });
       if (!fetched.ok) return remembered !== null ? { ok: true, ...remembered } : fetched;
       const found = pickLocation(parseJson(fetched.body));
       store(() => cache.put(key, Buffer.alloc(0), JSON.stringify({ place: found }), found === null ? MISS_TTL_MS : FOUND_TTL_MS));
@@ -259,7 +281,7 @@ export function createWebLookups(bb: BbPluginApi): WebLookups {
           maxBytes: 1024 * 1024,
           timeoutMs: 15_000,
           headers: validators,
-          allowsFakeIp,
+          extraRanges,
         }),
       );
       if (!fetched.ok) return hit !== null ? { ok: true, dataUrl: dataUrl("image/png", hit.body) } : fetched;
