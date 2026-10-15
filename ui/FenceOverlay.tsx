@@ -1,7 +1,8 @@
-// Fallback for BB versions without the code-fence renderer slot: an app-wide
+// Fallback for BB versions without the code-fence renderer slot: a thread-scoped
 // overlay finds the ```ui and ```app code blocks BB rendered in assistant
 // replies, hides each one, and portals a Fence into a node placed just before
-// it. Anywhere the overlay is not running (mobile, plugin disabled) the block
+// it. The header slot supplies the owning thread navigation context without
+// rendering a header control. Anywhere the overlay is not running the block
 // stays readable code.
 import { useEffect, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
@@ -45,6 +46,7 @@ function restore(wrapper: Element): void {
 function scan(
   previous: ReadonlyMap<string, FenceBlock>,
   pluginId: string,
+  threadId: string,
 ): { blocks: ReadonlyMap<string, FenceBlock>; appeared: boolean } {
   const next = new Map<string, FenceBlock>();
   const counts = new Map<string, number>();
@@ -55,7 +57,7 @@ function scan(
     const wrapper = code.parentElement?.parentElement;
     const rowId = row?.getAttribute("data-timeline-row-id") ?? "";
     // Only the assistant's replies, never user messages or tool output.
-    if (row === null || wrapper == null || !rowId.includes(":assistant:")) continue;
+    if (row === null || wrapper == null || !rowId.startsWith(`${threadId}:`) || !rowId.includes(":assistant:")) continue;
     const language: FenceLanguage = code.classList.contains("language-app") ? "app" : "ui";
     const counter = `${rowId}#${language}`;
     const index = counts.get(counter) ?? 0;
@@ -93,7 +95,7 @@ function scan(
   return { blocks: changed ? next : previous, appeared };
 }
 
-export function FenceOverlay() {
+export function FenceOverlay({ threadId }: { threadId: string }) {
   const [blocks, setBlocks] = useState<ReadonlyMap<string, FenceBlock>>(() => new Map());
   const actions = useThreadActions();
   const pluginId = experimental_usePluginId();
@@ -112,11 +114,11 @@ export function FenceOverlay() {
       flushSync(() => setBlocks(blocks));
     };
     const run = () => {
-      const { blocks, appeared } = scan(current, pluginId);
+      const { blocks, appeared } = scan(current, pluginId, threadId);
       if (blocks === current) return;
       if (appeared) commit(blocks);
       // Text streaming into a known block, or a block gone: at most every 60 ms.
-      else timer ??= window.setTimeout(() => commit(scan(current, pluginId).blocks), 60);
+      else timer ??= window.setTimeout(() => commit(scan(current, pluginId, threadId).blocks), 60);
     };
     const observer = new MutationObserver((records) => {
       // Our own renders mutate the page too; they never add or grow a block.
@@ -132,9 +134,12 @@ export function FenceOverlay() {
       observer.disconnect();
       clearTimeout(timer);
       for (const block of current.values()) block.mount.remove();
-      for (const wrapper of document.querySelectorAll(`[${HIDDEN_ATTRIBUTE}]`)) restore(wrapper);
+      for (const wrapper of document.querySelectorAll(`[${HIDDEN_ATTRIBUTE}]`)) {
+        const rowId = wrapper.closest(ROW)?.getAttribute("data-timeline-row-id");
+        if (rowId?.startsWith(`${threadId}:`)) restore(wrapper);
+      }
     };
-  }, [pluginId]);
+  }, [pluginId, threadId]);
 
   return [...blocks.values()].map((block) =>
     createPortal(<SettlingFence block={block} actions={actions} />, block.mount, block.key),

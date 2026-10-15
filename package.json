@@ -2,7 +2,14 @@
   "name": "bb-plugin-genui",
   "version": "0.2.0",
   "description": "BB plugin: agents answer with charts, diagrams, maps, plans and forms rendered inline in the chat.",
-  "keywords": ["bb-plugin", "generative-ui", "inline-ui", "charts", "diagrams", "components"],
+  "keywords": [
+    "bb-plugin",
+    "generative-ui",
+    "inline-ui",
+    "charts",
+    "diagrams",
+    "components"
+  ],
   "author": "ComicBit",
   "license": "Apache-2.0",
   "homepage": "https://github.com/ComicBit/bb-plugin-genui#readme",
@@ -49,6 +56,7 @@
     "@radix-ui/react-select": "^2.3.3",
     "@radix-ui/react-tooltip": "^1.2.12",
     "@shaderfrog/glsl-parser": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
