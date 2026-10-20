@@ -1,7 +1,8 @@
-// Compare's pixel work and view geometry, kept free of the DOM so it can be
-// tested: which pixels differ beyond a tolerance, the boxes around changed
-// regions, and the shared zoom/pan every pane draws from.
+// Compare's pixel work, kept free of the DOM so it can be tested: which
+// pixels differ beyond a tolerance, the boxes around changed regions, and the
+// view that frames one (the zoom and pan itself is zoomMath.ts).
 import type { Size } from "../../core/compare";
+import { clampView, fitScale, type View } from "./zoomMath";
 
 /** Per-channel tolerance (0-255) a fresh Compare starts with: anti-aliasing and JPEG noise stay quiet, a recoloured or moved element does not. */
 export const DEFAULT_TOLERANCE = 8;
@@ -167,80 +168,7 @@ export function formatPixelShare(changed: number, total: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// View geometry
-
-export interface Point {
-  readonly x: number;
-  readonly y: number;
-}
-
-/**
- * The shared zoom and pan: `zoom` relative to fitting the image in its pane
- * (1 = fit), and the image point at the pane's centre as a fraction of the
- * image (0.5, 0.5 = centred). Fractions, not pixels, so panes of any size
- * show the same part of their image.
- */
-export interface View {
-  readonly zoom: number;
-  readonly cx: number;
-  readonly cy: number;
-}
-
-export const FIT_VIEW: View = { zoom: 1, cx: 0.5, cy: 0.5 };
-export const MAX_ZOOM = 32;
-
-/** Pixels on screen per image pixel when the image is contained in the pane; never above 1, so a small image is not blown up. */
-export function fitScale(pane: Size, image: Size): number {
-  if (!(image.width > 0 && image.height > 0 && pane.width > 0 && pane.height > 0)) return 1;
-  return Math.min(1, pane.width / image.width, pane.height / image.height);
-}
-
-/** Where the image's top-left corner sits in the pane and its scale, for `view`; an image smaller than the pane is centred, a larger one never leaves a gap at an edge. */
-export function placeImage(view: View, pane: Size, image: Size): { readonly scale: number; readonly x: number; readonly y: number } {
-  const scale = fitScale(pane, image) * view.zoom;
-  const along = (paneLength: number, imageLength: number, centre: number) => {
-    const shown = imageLength * scale;
-    if (shown <= paneLength) return (paneLength - shown) / 2;
-    return Math.min(0, Math.max(paneLength - shown, paneLength / 2 - centre * shown));
-  };
-  return { scale, x: along(pane.width, image.width, view.cx), y: along(pane.height, image.height, view.cy) };
-}
-
-/** `view` with its zoom inside 1…MAX_ZOOM and its centre where `placeImage` would actually put it. */
-export function clampView(view: View, pane: Size, image: Size): View {
-  const zoom = Math.min(MAX_ZOOM, Math.max(1, Number.isFinite(view.zoom) ? view.zoom : 1));
-  const placed = placeImage({ zoom, cx: view.cx, cy: view.cy }, pane, image);
-  const shownWidth = image.width * placed.scale;
-  const shownHeight = image.height * placed.scale;
-  return {
-    zoom,
-    cx: shownWidth > 0 ? (pane.width / 2 - placed.x) / shownWidth : 0.5,
-    cy: shownHeight > 0 ? (pane.height / 2 - placed.y) / shownHeight : 0.5,
-  };
-}
-
-/** Zooms by `factor` keeping the image point under `at` (pane coordinates) where it is. */
-export function zoomAround(view: View, factor: number, at: Point, pane: Size, image: Size): View {
-  const before = placeImage(view, pane, image);
-  const imageX = (at.x - before.x) / before.scale;
-  const imageY = (at.y - before.y) / before.scale;
-  const zoom = Math.min(MAX_ZOOM, Math.max(1, view.zoom * factor));
-  const scale = fitScale(pane, image) * zoom;
-  const x = at.x - imageX * scale;
-  const y = at.y - imageY * scale;
-  return clampView(
-    { zoom, cx: (pane.width / 2 - x) / (image.width * scale), cy: (pane.height / 2 - y) / (image.height * scale) },
-    pane,
-    image,
-  );
-}
-
-/** Moves the image by `dx`, `dy` screen pixels (a drag), as far as its edges allow. */
-export function panBy(view: View, dx: number, dy: number, pane: Size, image: Size): View {
-  const scale = fitScale(pane, image) * view.zoom;
-  if (!(scale > 0)) return view;
-  return clampView({ zoom: view.zoom, cx: view.cx - dx / (image.width * scale), cy: view.cy - dy / (image.height * scale) }, pane, image);
-}
+// The view of a changed region
 
 /**
  * The view that shows `region` (image pixels) as large as it fits with a

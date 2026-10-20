@@ -1,7 +1,8 @@
 // Code, file snippets, diffs and diagrams drawn by BB's own viewers, so they
 // carry the user's code theme, highlighting and gutters exactly like code
 // elsewhere in BB.
-import { type ReactNode, type RefObject, useLayoutEffect, useRef } from "react";
+import { type MouseEvent, type ReactNode, type RefObject, useCallback, useLayoutEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import {
   experimental_Diff as HostDiff,
   experimental_SourceCode as HostSourceCode,
@@ -13,10 +14,11 @@ import { useUiRuntime } from "../runtime";
 import { useSketchFont } from "../sketchFont";
 import { useBackdropColor, useDarkTheme } from "../theme";
 import { finiteNumber, optionalText, text, type Props } from "../values";
-import { DiagramDetails } from "./diagram";
+import { DIAGRAM_SVG, DiagramDetails, DiagramViewer } from "./diagram";
 import { ErrorLine } from "./display";
 import { parseDetails } from "./explain-logic";
 import { sketchMermaid } from "./sketch";
+import { usePanZoom } from "./viewer";
 
 /** Language names models write → the file extension BB detects languages by. */
 const EXTENSIONS: Readonly<Record<string, string>> = {
@@ -210,17 +212,27 @@ export function Diff({ props }: { props: Props }) {
  * BB's diagram block, stripped to the drawing: no border, background or
  * padding, and its toolbar (source, zoom, copy) a quiet row of icons at the
  * top right, without the "MERMAID" label. Floating it over the drawing would
- * cover nodes in wide diagrams. Styled by structure (block > toolbar, body),
- * so if BB's markup changes the block simply keeps its own frame.
+ * cover nodes in wide diagrams. Styled by structure (block > toolbar, body >
+ * the SVG's frame), so if BB's markup changes the block simply keeps its own
+ * frame. A pinched drawing is zoomed inside its own box: the body clips it.
  */
 const DRAWING_CSS = `
 .genui-drawing>div{margin:0;border:0;border-radius:0;background:transparent}
 .genui-drawing>div>div:first-child{justify-content:flex-end;padding:0;opacity:.7;transition:opacity 150ms}
 .genui-drawing:hover>div>div:first-child,.genui-drawing>div>div:first-child:focus-within{opacity:1}
 .genui-drawing>div>div:first-child>span{display:none}
-.genui-drawing>div>div:last-child{padding:0}
+.genui-drawing>div>div:last-child{padding:0;overflow:hidden}
+.genui-drawing>div>div:last-child>div{transform-origin:0 0}
 @media (prefers-reduced-motion:reduce){.genui-drawing>div>div:first-child{transition:none}}
 `;
+
+/**
+ * BB's open button in the diagram's toolbar. Its dialog's pinch listeners
+ * attach before the dialog mounts, so on a touch screen it only pans; the
+ * diagram opens in DiagramViewer instead. Matched by label: if BB renames
+ * it, BB's own dialog simply opens again.
+ */
+const OPEN_BUTTON = 'button[aria-label="Open Mermaid diagram"]';
 
 /**
  * Each drawing's last height, by theme, width and source, kept across reloads
@@ -283,28 +295,71 @@ function useDrawnHeight(element: RefObject<HTMLDivElement | null>, dark: boolean
 
 /**
  * A Mermaid diagram, drawn by BB's chat markdown exactly like a ```mermaid
- * fence in a reply (zoom, source toggle and copy included), in the Excalidraw
+ * fence in a reply (source toggle and copy included), in the Excalidraw
  * style (sketch.ts): hand-drawn strokes in Excalifont, in its dark palette
  * under BB's dark theme. It has no frame or canvas of its own: it is drawn on
  * whatever it sits in, and edge labels take that colour. Nodes named in
- * `details` open their detail under the diagram (diagram.tsx).
+ * `details` open their detail under the diagram (diagram.tsx). A pinch or
+ * ⌘/Ctrl + scroll zooms it in place; BB's open button shows it full screen
+ * in DiagramViewer.
  */
 export function Diagram({ props }: { props: Props }) {
   const fontReady = useSketchFont();
   const dark = useDarkTheme();
   const host = useRef<HTMLDivElement>(null);
   const drawing = useRef<HTMLDivElement>(null);
+  const [surface, setSurface] = useState<HTMLDivElement | null>(null);
+  const attach = useCallback((element: HTMLDivElement | null) => {
+    drawing.current = element;
+    setSurface(element);
+  }, []);
+  const [full, setFull] = useState<{ readonly markup: string; readonly size: { width: number; height: number } } | null>(null);
   const backdrop = useBackdropColor(host, dark);
   const source = text(props.mermaid).trim();
   useDrawnHeight(drawing, dark, source);
+  // The SVG's frame in BB's block is what zooms; its parent, the block's body, is the pane.
+  const frameOf = () => surface?.querySelector(DIAGRAM_SVG)?.parentElement ?? null;
+  const zoom = usePanZoom(surface, {
+    measure: () => {
+      const frame = frameOf();
+      const body = frame?.parentElement;
+      if (!(frame instanceof HTMLElement) || !body) return null;
+      const rect = body.getBoundingClientRect();
+      const size = { width: frame.offsetWidth, height: frame.offsetHeight };
+      return { left: rect.left + body.clientLeft, top: rect.top + body.clientTop, pane: size, content: size };
+    },
+    draw: (placed, view) => {
+      const frame = frameOf();
+      if (frame instanceof HTMLElement) frame.style.transform = view.zoom > 1 ? `translate(${placed.x}px, ${placed.y}px) scale(${placed.scale})` : "";
+    },
+    plainWheel: false,
+    doubleTap: false,
+  });
   if (source === "") return <ErrorLine message="This diagram has no Mermaid source" />;
   const details = parseDetails(props.details);
   // A fence longer than any backtick run in the source keeps it one block.
   const longestRun = Math.max(0, ...Array.from(source.matchAll(/`+/g), (match) => match[0].length));
   const fence = "`".repeat(Math.max(3, longestRun + 1));
+
+  const openFull = (event: MouseEvent) => {
+    const svg = drawing.current?.querySelector<SVGSVGElement>(DIAGRAM_SVG);
+    if (!(event.target instanceof Element) || event.target.closest(OPEN_BUTTON) === null || !svg) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const box = svg.viewBox.baseVal;
+    const rect = svg.getBoundingClientRect();
+    setFull({ markup: svg.outerHTML, size: box !== null && box.width > 0 && box.height > 0 ? { width: box.width, height: box.height } : { width: rect.width, height: rect.height } });
+  };
+
   // Mermaid measures text as it lays out, so the font comes first.
   const diagram = (
-    <div ref={drawing} className="min-w-0">
+    <div
+      ref={attach}
+      onClickCapture={openFull}
+      // At its fitted size one finger scrolls the thread; zoomed in, it pans the drawing.
+      style={{ touchAction: zoom.zoomed ? "none" : "pan-x pan-y" }}
+      className="relative min-w-0"
+    >
       {fontReady && backdrop !== null ? (
         <Markdown
           content={`${fence}mermaid\n${sketchMermaid(source, dark, backdrop)}\n${fence}`}
@@ -313,6 +368,16 @@ export function Diagram({ props }: { props: Props }) {
       ) : (
         <div role="status" aria-label="Drawing diagram" className="h-40 animate-pulse rounded-lg bg-surface-recessed" />
       )}
+      {zoom.zoomed ? (
+        <button
+          type="button"
+          onClick={zoom.reset}
+          className="absolute left-0 top-0 inline-flex h-7 cursor-pointer items-center gap-1 rounded-md bg-surface-scrim/90 px-2 text-xs text-muted-foreground backdrop-blur-sm transition-colors duration-150 hover:bg-state-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          <Icon name="RotateCcw" aria-hidden className="size-3.5" />
+          Reset zoom
+        </button>
+      ) : null}
     </div>
   );
   return (
@@ -322,6 +387,19 @@ export function Diagram({ props }: { props: Props }) {
       </style>
       {details === null || details.length === 0 ? diagram : <DiagramDetails details={details}>{diagram}</DiagramDetails>}
       {details === null ? <ErrorLine message="Diagram details need an object of {nodeId: text or components}" /> : null}
+      {full === null ? null : (
+        <DiagramViewer
+          markup={full.markup}
+          size={full.size}
+          source={source}
+          details={details}
+          onClose={() => {
+            // Gone first: while it is open, the viewer keeps focus inside itself.
+            flushSync(() => setFull(null));
+            drawing.current?.querySelector<HTMLElement>(OPEN_BUTTON)?.focus();
+          }}
+        />
+      )}
     </div>
   );
 }

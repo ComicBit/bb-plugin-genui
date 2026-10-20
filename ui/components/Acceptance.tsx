@@ -41,6 +41,7 @@ import { CAPTION, FOCUS_RING } from "./inputs";
 import { useImageUrl } from "./media";
 import { CHART_DRAW_MS, FADE, RISE, SMOOTH_HEIGHT_CLASS, useEntrance, useSmoothHeight, type Entrance } from "./motion";
 import { ICON_BUTTON } from "./projectKit";
+import { useGroupPicture, ViewerGroup } from "./viewer";
 
 /** Criteria shown before "Show N more", and how many each press adds. */
 const PAGE = 30;
@@ -373,10 +374,10 @@ function EvidenceLink({ item }: { item: Extract<Evidence, { kind: "url" }> }) {
   );
 }
 
-function EvidenceImage({ item }: { item: Extract<Evidence, { kind: "image" }> }) {
+function EvidenceImage({ item, order }: { item: Extract<Evidence, { kind: "image" }>; order: number }) {
   const image = useImageUrl(item.src);
-  const [full, setFull] = useState(false);
   const name = item.label ?? item.src.split(/[\\/]/).pop() ?? item.src;
+  const open = useGroupPicture(order, image.status === "ready" ? { url: image.url, alt: item.label ?? `Evidence: ${name}`, caption: item.label ?? item.src } : null);
   return (
     <figure className="m-0 flex min-w-0 flex-col gap-1">
       {image.status === "failed" ? (
@@ -389,17 +390,16 @@ function EvidenceImage({ item }: { item: Extract<Evidence, { kind: "image" }> })
       ) : (
         <button
           type="button"
-          aria-label={full ? `Show ${name} smaller` : `Show ${name} at full size`}
-          aria-pressed={full}
-          onClick={() => setFull((value) => !value)}
+          aria-label={`View ${name} full size`}
+          disabled={image.status !== "ready"}
+          onClick={(event) => open(event.currentTarget)}
           className={cn(
-            "flex min-w-0 cursor-zoom-in items-center justify-center overflow-hidden rounded-md border border-border bg-surface-recessed",
-            full ? "cursor-zoom-out" : "h-52",
+            "flex h-52 min-w-0 cursor-zoom-in items-center justify-center overflow-hidden rounded-md border border-border bg-surface-recessed disabled:cursor-default",
             FOCUS_RING,
           )}
         >
           {image.status === "ready" ? (
-            <img src={image.url} alt={item.label ?? `Evidence: ${name}`} className={cn("block max-w-full", full ? "h-auto w-full" : "max-h-full object-contain")} />
+            <img src={image.url} alt={item.label ?? `Evidence: ${name}`} className="block max-h-full max-w-full object-contain" />
           ) : (
             <span role="status" aria-label={`Loading ${name}`} className="block size-full animate-pulse bg-muted motion-reduce:animate-none" />
           )}
@@ -424,14 +424,14 @@ function EvidenceText({ item }: { item: Extract<Evidence, { kind: "text" }> }) {
   );
 }
 
-function EvidenceItem({ item, tone }: { item: Evidence; tone: MarkTone }) {
+function EvidenceItem({ item, tone, order }: { item: Evidence; tone: MarkTone; order: number }) {
   switch (item.kind) {
     case "file":
       return <EvidenceFile item={item} tone={tone} />;
     case "url":
       return <EvidenceLink item={item} />;
     case "image":
-      return <EvidenceImage item={item} />;
+      return <EvidenceImage item={item} order={order} />;
     default:
       return <EvidenceText item={item} />;
   }
@@ -522,12 +522,14 @@ function EvidencePanel({ criterion, column, check, onClose, id }: { criterion: C
       {check.note === null ? null : <Markdown content={check.note} className={SMALL_PROSE} />}
       <Facts check={check} rowLevel={rowLevel} />
       {check.evidence.length > 0 ? (
-        <div className="flex min-w-0 flex-col gap-1.5">
-          <span className={CAPTION}>Evidence</span>
-          {check.evidence.map((item, index) => (
-            <EvidenceItem key={index} item={item} tone={MARK_TONE[check.status]} />
-          ))}
-        </div>
+        <ViewerGroup>
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <span className={CAPTION}>Evidence</span>
+            {check.evidence.map((item, index) => (
+              <EvidenceItem key={index} item={item} tone={MARK_TONE[check.status]} order={index} />
+            ))}
+          </div>
+        </ViewerGroup>
       ) : null}
       {quiet.map((text) => (
         <p key={text} className="m-0 text-xs leading-5 text-muted-foreground">

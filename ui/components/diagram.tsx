@@ -1,19 +1,23 @@
 // Clickable Mermaid nodes. BB draws the diagram (code.tsx's Diagram); this
 // layer finds the drawn nodes named in `details` by their mermaid id and
 // turns them into buttons, and opens the selected node's detail under the
-// diagram. The SVG belongs to BB's renderer and is replaced on every redraw
-// (source toggle, theme change, streaming), so nodes are decorated with
-// attributes only and re-found by a MutationObserver; events are delegated.
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
+// diagram, or in a popup over it in the full-screen view (DiagramViewer). The
+// SVG belongs to BB's renderer and is replaced on every redraw (source
+// toggle, theme change, streaming), so nodes are decorated with attributes
+// only and re-found by a MutationObserver; events are delegated.
+import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { Markdown } from "@get-bb/plugin-sdk/app";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
+import type { Size } from "../../core/compare";
 import { RenderNodes } from "../render";
+import { useUiRuntime } from "../runtime";
 import { ACCENT } from "../values";
 import { detailFor, mermaidNodeId, type DiagramDetail } from "./explain-logic";
 import { FOCUS_RING } from "./inputs";
 import { SMOOTH_HEIGHT_CLASS, useSmoothHeight } from "./motion";
 import { sketchPalette, type SketchPalette } from "./sketch";
+import { FullScreen, VIEWER_BUTTON, ZoomPane } from "./viewer";
 
 /** The attribute that marks a decorated node; its value is the detail key. */
 const NODE_ATTR = "data-genui-node";
@@ -42,8 +46,8 @@ ${node}:focus-visible ${outline}{stroke-width:3.5px!important}`;
 }
 
 /**
- * Global, because BB's zoom view shows a copy of the SVG in a dialog outside
- * this component. Mermaid styles nodes by `#svg-id` selectors, so the
+ * Global, because the full-screen view shows a copy of the SVG outside this
+ * component. Mermaid styles nodes by `#svg-id` selectors, so the
  * overrides need `!important`.
  */
 const NODE_CSS = `
@@ -58,7 +62,7 @@ ${roughNodeCss("html.dark", sketchPalette(true))}
 `;
 
 /** Mermaid's SVG, not an icon: only diagrams carry a role description. */
-const DIAGRAM_SVG = "svg[aria-roledescription]";
+export const DIAGRAM_SVG = "svg[aria-roledescription]";
 
 interface Candidate {
   readonly element: SVGGElement;
@@ -128,11 +132,6 @@ function nodeKey(target: EventTarget | null): string | null {
   return target.closest(`[${NODE_ATTR}]`)?.getAttribute(NODE_ATTR) ?? null;
 }
 
-/** How far a press may travel and still count as a tap (BB's zoom view pans on drag). */
-const TAP_SLOP_PX = 6;
-/** How long a click in the frame waits for BB's zoom view to show the diagram. */
-const ZOOM_WAIT_MS = 4000;
-
 function DetailBody({ detail }: { detail: DiagramDetail }) {
   return (
     <div className="flex min-w-0 flex-col gap-3">
@@ -155,15 +154,13 @@ function DetailBody({ detail }: { detail: DiagramDetail }) {
 export function DiagramDetails({ details, children }: { details: readonly DiagramDetail[]; children: ReactNode }) {
   const panelId = useId();
   const host = useRef<HTMLDivElement>(null);
-  const panel = useRef<HTMLDivElement>(null);
   const { outer, inner } = useSmoothHeight<HTMLDivElement, HTMLDivElement>();
   const [selected, setSelected] = useState<string | null>(null);
   const [labels, setLabels] = useState<Readonly<Record<string, string>>>({});
   const [drawn, setDrawn] = useState(false);
-  // Native listeners on the zoom copy read the latest values through refs.
+  // The observer's callback reads the latest values through a ref.
   const latest = useRef({ details, selected });
   latest.current = { details, selected };
-  const zoomCopies = useRef(new Set<SVGSVGElement>());
 
   const apply = () => {
     const root = host.current;
@@ -174,10 +171,6 @@ export function DiagramDetails({ details, children }: { details: readonly Diagra
     if (svg === null) return;
     const next = decorate(svg, details, selected, panelId).labels;
     setLabels((previous) => (JSON.stringify(previous) === JSON.stringify(next) ? previous : next));
-    for (const copy of zoomCopies.current) {
-      if (copy.isConnected) decorate(copy, details, selected, panelId);
-      else zoomCopies.current.delete(copy);
-    }
   };
   const applyRef = useRef(apply);
   applyRef.current = apply;
@@ -203,84 +196,9 @@ export function DiagramDetails({ details, children }: { details: readonly Diagra
   useLayoutEffect(() => applyRef.current(), [selected, details]);
 
   const toggle = (key: string) => setSelected((current) => (current === key ? null : key));
-
-  /**
-   * BB's zoom button shows a copy of the SVG (same id) in a dialog. While it
-   * is open its nodes work too: a tap selects, closes the dialog and brings
-   * the detail into view.
-   */
-  const watchZoom = () => {
-    const svgId = host.current?.querySelector(DIAGRAM_SVG)?.id;
-    if (!svgId) return;
-    const started = Date.now();
-    let seen = false;
-    const scan = () => {
-      const copies = [...document.querySelectorAll<SVGSVGElement>(`svg[id="${CSS.escape(svgId)}"]`)].filter(
-        (svg) => !host.current?.contains(svg),
-      );
-      for (const copy of copies) {
-        if (zoomCopies.current.has(copy)) continue;
-        zoomCopies.current.add(copy);
-        seen = true;
-        const { details, selected } = latest.current;
-        decorate(copy, details, selected, panelId);
-        listenToCopy(copy);
-      }
-      if ((seen && copies.length === 0) || (!seen && Date.now() - started > ZOOM_WAIT_MS)) observer.disconnect();
-    };
-    const observer = new MutationObserver(scan);
-    observer.observe(document.body, { childList: true, subtree: true });
-    scan();
-  };
-
-  const listenToCopy = (copy: SVGSVGElement) => {
-    const pick = (key: string) => {
-      setSelected(key);
-      // BB's dialog closes on Escape; the detail opens under the diagram.
-      copy.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      requestAnimationFrame(() => panel.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }));
-    };
-    // The zoom view captures the pointer to pan, which retargets the click
-    // away from the node: a tap is a press on a node released close by.
-    copy.addEventListener(
-      "pointerdown",
-      (down) => {
-        const key = nodeKey(down.target);
-        if (key === null || !down.isPrimary) return;
-        // One press, one answer: the release or cancel of this pointer ends it.
-        const press = new AbortController();
-        const options = { capture: true, signal: press.signal };
-        window.addEventListener(
-          "pointerup",
-          (up) => {
-            if (up.pointerId !== down.pointerId) return;
-            press.abort();
-            if (Math.hypot(up.clientX - down.clientX, up.clientY - down.clientY) <= TAP_SLOP_PX) pick(key);
-          },
-          options,
-        );
-        window.addEventListener("pointercancel", (cancel) => cancel.pointerId === down.pointerId && press.abort(), options);
-      },
-      { capture: true },
-    );
-    copy.addEventListener("keydown", (event) => {
-      const key = nodeKey(event.target);
-      if (key === null || (event.key !== "Enter" && event.key !== " ")) return;
-      event.preventDefault();
-      pick(key);
-    });
-  };
-
-  // Copies left behind by an unmounted diagram stop being decorated.
-  useEffect(() => () => zoomCopies.current.clear(), []);
-
   const onClick = (event: MouseEvent) => {
     const key = nodeKey(event.target);
-    if (key !== null) {
-      toggle(key);
-      return;
-    }
-    if ((event.target as Element).closest("button") !== null) watchZoom();
+    if (key !== null) toggle(key);
   };
 
   const onKeyDown = (event: KeyboardEvent) => {
@@ -336,7 +254,7 @@ export function DiagramDetails({ details, children }: { details: readonly Diagra
           <span aria-live="polite" className="sr-only">
             {detail === null ? "" : `Showing ${title}`}
           </span>
-          <div ref={panel} id={panelId} role="region" aria-label={detail === null ? "Details" : title} className="min-w-0">
+          <div id={panelId} role="region" aria-label={detail === null ? "Details" : title} className="min-w-0">
             {detail === null ? (
               <p className="m-0 pt-2.5 text-xs leading-5 text-muted-foreground">
                 {drawn && unmatched.length < details.length
@@ -368,5 +286,126 @@ export function DiagramDetails({ details, children }: { details: readonly Diagra
         </div>
       </div>
     </>
+  );
+}
+
+const NO_DETAILS: readonly DiagramDetail[] = [];
+
+/**
+ * A diagram full screen: a copy of the drawn SVG (`markup`, at its natural
+ * `size`), zoomed and panned like a picture, with BB's copy action. A node
+ * with a detail opens it in a popup over the drawing, which folds to its
+ * title; a tap elsewhere, Escape or its close button dismisses it and leaves
+ * the diagram open.
+ */
+export function DiagramViewer({
+  markup,
+  size,
+  source,
+  details,
+  onClose,
+}: {
+  markup: string;
+  size: Size;
+  source: string;
+  details: readonly DiagramDetail[] | null;
+  onClose: () => void;
+}) {
+  const { run } = useUiRuntime();
+  const popupId = useId();
+  const drawing = useRef<HTMLDivElement>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [folded, setFolded] = useState(false);
+  const [labels, setLabels] = useState<Readonly<Record<string, string>>>({});
+  const list = details ?? NO_DETAILS;
+
+  useLayoutEffect(() => {
+    const svg = drawing.current?.querySelector<SVGSVGElement>(DIAGRAM_SVG);
+    if (svg === undefined || svg === null) return;
+    const next = decorate(svg, list, selected, popupId).labels;
+    setLabels((previous) => (JSON.stringify(previous) === JSON.stringify(next) ? previous : next));
+  }, [markup, list, selected, popupId]);
+
+  const pick = (key: string) => {
+    setSelected((current) => (current === key ? null : key));
+    setFolded(false);
+  };
+  const detail = list.find((candidate) => candidate.key === selected) ?? null;
+  const title = detail === null ? "" : (labels[detail.key] ?? detail.key);
+  const button = cn(VIEWER_BUTTON, "bg-surface-recessed text-foreground hover:bg-state-hover focus-visible:ring-ring");
+
+  return (
+    <FullScreen
+      label="Diagram"
+      tone="page"
+      onClose={onClose}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && selected !== null) {
+          event.preventDefault();
+          setSelected(null);
+        }
+      }}
+      actions={
+        <button type="button" aria-label="Copy Mermaid source" title="Copy Mermaid source" onClick={() => void run([{ kind: "action", type: "copy", text: source }])} className={button}>
+          <Icon name="Copy" className="size-4" />
+        </button>
+      }
+    >
+      <div className="relative flex min-h-0 flex-1">
+        <ZoomPane content={size} tone="page" onBackdropTap={() => setSelected(null)}>
+          {/* Delegated: the nodes live in the copied SVG, which React does not render. */}
+          <div
+            ref={drawing}
+            onClick={(event) => {
+              const key = nodeKey(event.target);
+              if (key === null) setSelected(null);
+              else pick(key);
+            }}
+            onKeyDown={(event) => {
+              const key = nodeKey(event.target);
+              if (key === null || (event.key !== "Enter" && event.key !== " ")) return;
+              event.preventDefault();
+              pick(key);
+            }}
+            className="size-full [&>svg]:block [&>svg]:size-full [&>svg]:max-w-none"
+            dangerouslySetInnerHTML={{ __html: markup }}
+          />
+        </ZoomPane>
+        {detail === null ? null : (
+          <section
+            key={detail.key}
+            id={popupId}
+            aria-label={title}
+            className="absolute inset-x-3 bottom-16 z-20 mx-auto flex max-h-[min(50dvh,30rem)] max-w-md flex-col overflow-hidden rounded-xl border border-border bg-background text-foreground shadow-[0_8px_30px_rgb(0_0_0/0.18)] sm:left-auto sm:right-4 sm:mx-0 sm:w-96"
+          >
+            <div className="flex min-w-0 shrink-0 items-center gap-1 py-1.5 pl-1.5 pr-1.5">
+              <button
+                type="button"
+                aria-expanded={!folded}
+                aria-controls={`${popupId}-body`}
+                onClick={() => setFolded((value) => !value)}
+                className={cn("flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-left hover:bg-state-hover", FOCUS_RING)}
+              >
+                <Icon name="ChevronDown" aria-hidden className={cn("size-4 shrink-0 text-muted-foreground transition-transform duration-150 motion-reduce:transition-none", folded && "-rotate-90")} />
+                <h4 className="m-0 min-w-0 truncate text-sm font-medium leading-5">{title}</h4>
+              </button>
+              <button
+                type="button"
+                aria-label={`Close ${title}`}
+                onClick={() => setSelected(null)}
+                className={cn("inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-state-hover hover:text-foreground", FOCUS_RING)}
+              >
+                <Icon name="X" aria-hidden className="size-4" />
+              </button>
+            </div>
+            {folded ? null : (
+              <div id={`${popupId}-body`} className="min-h-0 select-text overflow-y-auto overscroll-contain px-3 pb-3">
+                <DetailBody detail={detail} />
+              </div>
+            )}
+          </section>
+        )}
+      </div>
+    </FullScreen>
   );
 }

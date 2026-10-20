@@ -2,12 +2,12 @@
 // `$BB_THREAD_STORAGE/…`) or an https URL, is read through the plugin
 // backend: files confined to the thread, https images through the
 // address-checked proxy that the webLookups setting switches off.
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { toast } from "sonner";
+import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { useUiRuntime, type ImageUrl } from "../runtime";
 import { optionalText, text, type Props } from "../values";
 import { ErrorLine } from "./display";
+import { useViewer } from "./viewer";
 
 type Source =
   | { readonly kind: "url"; readonly url: string }
@@ -76,63 +76,57 @@ export function WebOffLine({ what }: { what: string }) {
 
 const SURFACE = "relative flex min-w-0 justify-center overflow-hidden rounded-lg border border-border bg-surface-recessed";
 
+/** One picture; pressing it opens it full screen, where a file can also be opened in BB. */
 export function Image({ props }: { props: Props }) {
-  const { openFile } = useUiRuntime();
   const src = text(props.src).trim();
   const alt = optionalText(props.alt)?.trim() ?? "";
   const source = useMemo(() => imageSource(src), [src]);
   const image = useImageUrl(src);
   const [decoded, setDecoded] = useState<{ readonly url: string; readonly ok: boolean } | null>(null);
+  const url = image.status === "ready" ? image.url : null;
+  const { open, viewer } = useViewer(
+    url === null ? [] : [{ url, alt, caption: null, path: source.kind === "file" ? source.path : undefined }],
+  );
 
   if (image.status === "failed") {
     return image.off ? <WebOffLine what="Image" /> : <ErrorLine message={`Couldn't show ${src}: ${image.error}`} />;
   }
-  const url = image.status === "ready" ? image.url : null;
   const result = url !== null && decoded?.url === url ? decoded : null;
   if (result !== null && !result.ok) return <ErrorLine message={`Couldn't load the image at ${src}`} />;
   const ready = result !== null;
 
-  const picture: ReactNode = (
-    <>
-      {ready ? null : (
-        <div
-          role="status"
-          aria-label={alt === "" ? "Loading image" : `Loading image: ${alt}`}
-          className="h-48 w-full animate-pulse motion-reduce:animate-none"
-        />
-      )}
-      {url === null ? null : (
-        <img
-          src={url}
-          alt={alt}
-          decoding="async"
-          onLoad={() => setDecoded({ url, ok: true })}
-          onError={() => setDecoded({ url, ok: false })}
-          className={cn(
-            "block h-auto max-h-96 max-w-full object-contain transition-opacity duration-200 motion-reduce:transition-none",
-            ready ? "opacity-100" : "absolute inset-0 opacity-0",
-          )}
-        />
-      )}
-    </>
-  );
-
-  if (source.kind !== "file" || openFile === null) return <div className={SURFACE}>{picture}</div>;
-  const path = source.path;
   return (
-    <button
-      type="button"
-      title={`Open ${path}`}
-      aria-label={alt === "" ? `Open ${path}` : `${alt}. Open ${path}`}
-      onClick={async () => {
-        if (!(await openFile(path))) toast.error(`Couldn't open ${path}`);
-      }}
-      className={cn(
-        SURFACE,
-        "w-full cursor-zoom-in p-0 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-      )}
-    >
-      {picture}
-    </button>
+    <>
+      <button
+        type="button"
+        disabled={!ready}
+        aria-label={alt === "" ? "View image full size" : `${alt}. View full size`}
+        onClick={(event) => open(0, event.currentTarget)}
+        className={cn(SURFACE, "w-full cursor-zoom-in p-0 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-default")}
+      >
+        {ready ? null : (
+          <div
+            role="status"
+            aria-label={alt === "" ? "Loading image" : `Loading image: ${alt}`}
+            className="h-48 w-full animate-pulse motion-reduce:animate-none"
+          />
+        )}
+        {url === null ? null : (
+          <img
+            src={url}
+            alt={alt}
+            decoding="async"
+            onLoad={() => setDecoded({ url, ok: true })}
+            onError={() => setDecoded({ url, ok: false })}
+            className={cn(
+              "block h-auto max-h-96 max-w-full object-contain transition-opacity duration-200 motion-reduce:transition-none",
+              ready ? "opacity-100" : "absolute inset-0 opacity-0",
+            )}
+          />
+        )}
+      </button>
+      {/* Outside the button: the viewer's clicks bubble through the React tree. */}
+      {viewer}
+    </>
   );
 }

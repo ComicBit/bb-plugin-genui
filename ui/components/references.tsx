@@ -46,6 +46,7 @@ import {
   type HotspotPoint,
   type SourceLink,
 } from "./references-model";
+import { ExpandButton, useViewer } from "./viewer";
 
 // ---------------------------------------------------------------------------
 // Shared
@@ -185,15 +186,21 @@ export function Entity({ props }: { props: Props }) {
   const picture = usePicture(text(props.image));
   const [decoded, setDecoded] = useState<{ readonly url: string; readonly ok: boolean } | null>(null);
   const [open, setOpen] = useState(false);
+  const url = picture.status === "ready" ? picture.url : null;
+  const shown = url !== null && decoded?.url === url && decoded.ok;
+  // The detail dialog is modal: it closes while its picture is full screen and comes back after.
+  const backToDetail = useRef(false);
+  const { open: view, viewer } = useViewer(url === null || !shown ? [] : [{ url, alt: name, caption: name }], () => {
+    if (backToDetail.current) setOpen(true);
+    backToDetail.current = false;
+  });
 
   if (name === "") return <ErrorLine message="Entity needs a name" />;
 
-  const url = picture.status === "ready" ? picture.url : null;
   const settle = (ok: boolean) => {
     if (url !== null && decoded?.url !== url) setDecoded({ url, ok });
   };
   const decodeFailed = url !== null && decoded?.url === url && !decoded.ok;
-  const shown = url !== null && decoded?.url === url && decoded.ok;
   const hasPicture = picture.status === "loading" || (url !== null && !decodeFailed);
   const problems = [
     pairs === null ? "Entity facts must be an object or a list of [label, value] pairs" : null,
@@ -238,6 +245,8 @@ export function Entity({ props }: { props: Props }) {
                 className="absolute inset-0 size-full object-cover transition-opacity duration-300 motion-reduce:transition-none"
               />
             )}
+            {/* The card opens the detail; the picture alone opens full size from its corner. */}
+            {shown ? <ExpandButton label={`View the picture of ${name} full size`} onOpen={(button) => view(0, button)} className="right-1.5 top-1.5" /> : null}
           </>
         ) : (
           // A monogram stands in for a missing picture in the list layout.
@@ -306,14 +315,24 @@ export function Entity({ props }: { props: Props }) {
               {...(note === null ? { "aria-describedby": undefined } : {})}
             >
               {url !== null && shown ? (
-                <div data-bb-image-preview-ignore="" className="flex justify-center overflow-hidden rounded-lg bg-surface-recessed">
+                <button
+                  type="button"
+                  data-bb-image-preview-ignore=""
+                  aria-label={`View the picture of ${name} full size`}
+                  onClick={() => {
+                    backToDetail.current = true;
+                    setOpen(false);
+                    view(0, null);
+                  }}
+                  className={cn("flex cursor-zoom-in justify-center overflow-hidden rounded-lg bg-surface-recessed", FOCUS_RING)}
+                >
                   <img
                     src={url}
                     alt={name}
                     referrerPolicy="no-referrer"
                     className="block max-h-[min(50vh,28rem)] w-auto max-w-full object-contain"
                   />
-                </div>
+                </button>
               ) : null}
               <DialogHeader className="min-w-0 gap-1 space-y-0 pr-6">
                 {KIND_LABEL[kind] === "" ? null : (
@@ -351,6 +370,7 @@ export function Entity({ props }: { props: Props }) {
       {problems.map((problem) => (
         <ErrorLine key={problem} message={problem} />
       ))}
+      {viewer}
     </div>
   );
 }
@@ -573,6 +593,9 @@ export function Hotspots({ props }: { props: Props }) {
   const ready = size !== null && size.ratio !== null;
   const ratio = size?.ratio ?? 16 / 9;
   const active = points.some((point) => point.number === selected) ? selected : null;
+  const { open, viewer } = useViewer(
+    url === null || !ready ? [] : [{ url, alt: points.length === 0 ? "Picture" : `Picture with ${points.map((point) => `${point.number}. ${point.title}`).join(", ")}`, caption: null }],
+  );
 
   const toggle = (number: number, fromPin: boolean) => {
     const next = active === number ? null : number;
@@ -619,6 +642,8 @@ export function Hotspots({ props }: { props: Props }) {
               className="absolute inset-0 size-full rounded-lg border border-border object-fill transition-opacity duration-300 motion-reduce:transition-none"
             />
           )}
+          {/* The pins are the picture's own taps, so viewing it full size is its own button. */}
+          {ready ? <ExpandButton label="View the picture full size" onOpen={(button) => open(0, button)} className="right-2 top-2" /> : null}
           {ready
             ? points.map((point) => (
                 <Pin
@@ -640,6 +665,7 @@ export function Hotspots({ props }: { props: Props }) {
   return (
     <div className="flex min-w-0 flex-col gap-3" onKeyDown={onKeyDown}>
       {image}
+      {viewer}
       {points.length === 0 ? null : (
         <div ref={outer} className={cn("min-w-0", SMOOTH_HEIGHT_CLASS)}>
           <div ref={inner} className="min-w-0">

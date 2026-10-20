@@ -3,18 +3,11 @@ import { inflateSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import {
   changedRegions,
-  clampView,
   DEFAULT_TOLERANCE,
   diffGrid,
-  FIT_VIEW,
-  fitScale,
   formatPixelShare,
-  MAX_ZOOM,
-  panBy,
   pixelDiff,
-  placeImage,
   viewOfRegion,
-  zoomAround,
 } from "./compare-logic";
 
 /** A width×height RGBA buffer filled with one colour. */
@@ -190,41 +183,9 @@ describe("formatPixelShare", () => {
   });
 });
 
-describe("view geometry", () => {
+describe("viewOfRegion", () => {
   const pane = { width: 400, height: 250 };
   const image = { width: 1600, height: 1000 };
-
-  it("fits by containing, and never blows a small image up", () => {
-    expect(fitScale(pane, image)).toBe(0.25);
-    expect(fitScale(pane, { width: 200, height: 100 })).toBe(1);
-    expect(fitScale({ width: 0, height: 0 }, image)).toBe(1);
-  });
-
-  it("centres the fitted image and clamps a zoomed one to its edges", () => {
-    expect(placeImage(FIT_VIEW, { width: 400, height: 400 }, image)).toEqual({ scale: 0.25, x: 0, y: 75 });
-    expect(placeImage({ zoom: 4, cx: 0, cy: 0 }, pane, image)).toEqual({ scale: 1, x: 0, y: 0 });
-    expect(placeImage({ zoom: 4, cx: 1, cy: 1 }, pane, image)).toEqual({ scale: 1, x: -1200, y: -750 });
-  });
-
-  it("keeps the point under the cursor in place while zooming", () => {
-    const at = { x: 100, y: 60 };
-    const before = placeImage(FIT_VIEW, pane, image);
-    const view = zoomAround(FIT_VIEW, 3, at, pane, image);
-    const after = placeImage(view, pane, image);
-    expect(view.zoom).toBe(3);
-    expect((at.x - after.x) / after.scale).toBeCloseTo((at.x - before.x) / before.scale, 6);
-    expect((at.y - after.y) / after.scale).toBeCloseTo((at.y - before.y) / before.scale, 6);
-  });
-
-  it("clamps zoom to 1…MAX_ZOOM and pans only as far as the edges", () => {
-    expect(zoomAround(FIT_VIEW, 0.5, { x: 0, y: 0 }, pane, image)).toEqual(FIT_VIEW);
-    expect(zoomAround(FIT_VIEW, 1000, { x: 200, y: 125 }, pane, image).zoom).toBe(MAX_ZOOM);
-    expect(panBy(FIT_VIEW, 50, 50, pane, image)).toEqual(FIT_VIEW);
-    const zoomed = { zoom: 2, cx: 0.5, cy: 0.5 };
-    expect(panBy(zoomed, 100, 0, pane, image)).toEqual({ zoom: 2, cx: 0.375, cy: 0.5 });
-    expect(panBy(zoomed, 10_000, 0, pane, image).cx).toBeCloseTo(0.25, 9);
-    expect(clampView({ zoom: Number.NaN, cx: 9, cy: -9 }, pane, image)).toEqual(FIT_VIEW);
-  });
 
   it("zooms to a changed region with room around it, keeping context around a tiny one", () => {
     const wide = viewOfRegion({ x: 400, y: 300, width: 200, height: 50, pixels: 3000 }, pane, image);

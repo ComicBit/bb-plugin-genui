@@ -25,26 +25,21 @@ import { formatNumber, TONE_PILL, type Props } from "../values";
 import { useWidth } from "./chartKit";
 import {
   changedRegions,
-  clampView,
   DEFAULT_TOLERANCE,
   diffGrid,
-  FIT_VIEW,
   formatPixelShare,
   MAX_TOLERANCE,
-  panBy,
   pixelDiff,
-  placeImage,
   viewOfRegion,
-  zoomAround,
-  type Point,
   type Region,
-  type View,
 } from "./compare-logic";
 import { ErrorLine } from "./display";
 import { FIELD, FOCUS_RING } from "./inputs";
 import { imageSource, useImageUrl } from "./media";
 import { Frame, Heading, Quiet, Segmented, useOpenUrl } from "./perfKit";
 import { ICON_BUTTON } from "./projectKit";
+import { useViewer } from "./viewer";
+import { clampView, FIT_VIEW, panBy, pinchView, placeImage, wheelZoomFactor, zoomAround, type Point, type View } from "./zoomMath";
 
 type Mode = "side" | "wipe" | "overlay" | "difference";
 
@@ -488,7 +483,7 @@ function Identity({ role, image, size, differing }: { role: string; image: Compa
 type Gesture =
   | { readonly kind: "pan"; last: Point }
   | { readonly kind: "divider" }
-  | { readonly kind: "pinch"; readonly distance: number; readonly middle: Point; readonly view: View };
+  | { readonly kind: "pinch"; readonly from: readonly [Point, Point]; readonly view: View };
 
 interface StageProps {
   mode: Mode;
@@ -534,6 +529,14 @@ function Stage(props: StageProps) {
   const fit = candidateSize === null || referenceSize === null ? null : placement(referenceSize, candidateSize);
   const candidateBox: Size = { width: image.width, height: fit?.height ?? image.height };
   const percent = Math.round(placed.scale * 100);
+  const referenceLabel = reference.named ? `Reference · ${reference.label}` : "Reference";
+  // Full screen, the two pictures one after the other (arrows or a swipe step between them).
+  const { open, viewer } = useViewer(
+    [
+      { decoded: referenceImage, caption: referenceLabel },
+      { decoded: candidateImage, caption: candidate.label },
+    ].flatMap(({ decoded, caption }) => (decoded.status === "ready" ? [{ url: decoded.url, alt: caption, caption }] : [])),
+  );
 
   // Live values for the native wheel listener and the gestures.
   const live = useRef({ pane, image, shown, mode });
@@ -552,14 +555,12 @@ function Stage(props: StageProps) {
       const { pane: size, image: picture, shown: current } = live.current;
       const rect = paneElement.getBoundingClientRect();
       const at = { x: event.clientX - rect.left - paneElement.clientLeft, y: event.clientY - rect.top - paneElement.clientTop };
-      const lines = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? size.height : 1;
       if (event.ctrlKey || event.metaKey) {
-        // Trackpad pinches arrive as ctrl+wheel with small deltas; a mouse wheel notch is clamped to one step.
         event.preventDefault();
-        const delta = Math.min(50, Math.max(-50, event.deltaY * lines));
-        setView(zoomAround(current, Math.exp(-delta * 0.01), at, size, picture));
+        setView(zoomAround(current, wheelZoomFactor(event.deltaY, event.deltaMode, size.height), at, size, picture));
         return;
       }
+      const lines = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? size.height : 1;
       if (current.zoom <= 1) return;
       const next = panBy(current, -event.deltaX * lines, -event.deltaY * lines, size, picture);
       // At an edge the page scrolls on, as everywhere else in the conversation.
@@ -586,8 +587,7 @@ function Stage(props: StageProps) {
     const point = local(event);
     pointers.current.set(event.pointerId, point);
     if (pointers.current.size === 2) {
-      const [a, b] = [...pointers.current.values()] as [Point, Point];
-      gesture.current = { kind: "pinch", distance: Math.hypot(a.x - b.x, a.y - b.y) || 1, middle: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, view: live.current.shown };
+      gesture.current = { kind: "pinch", from: [...pointers.current.values()] as [Point, Point], view: live.current.shown };
       return;
     }
     if (pointers.current.size > 2) return;
@@ -613,10 +613,7 @@ function Stage(props: StageProps) {
     const { pane: size, image: picture } = live.current;
     if (current === null) return;
     if (current.kind === "pinch") {
-      const [a, b] = [...pointers.current.values()] as [Point, Point];
-      const middle = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-      const zoomed = zoomAround(current.view, Math.hypot(a.x - b.x, a.y - b.y) / current.distance, current.middle, size, picture);
-      setView(panBy(zoomed, middle.x - current.middle.x, middle.y - current.middle.y, size, picture));
+      setView(pinchView(current.view, current.from, [...pointers.current.values()] as [Point, Point], size, picture));
     } else if (current.kind === "pan") {
       const dx = point.x - current.last.x;
       const dy = point.y - current.last.y;
@@ -695,7 +692,6 @@ function Stage(props: StageProps) {
   );
   const paneStyle: CSSProperties = { width: paneWidth || "100%", height: pane.height + 2 };
   const candidateLabel = candidate.label;
-  const referenceLabel = reference.named ? `Reference · ${reference.label}` : "Reference";
 
   let panes: ReactNode;
   if (mode === "side") {
@@ -854,6 +850,16 @@ function Stage(props: StageProps) {
             <Icon name="ZoomIn" aria-hidden className="size-3.5" />
           </button>
           <button type="button" aria-label="Fit" title="Fit (0)" disabled={!zoomed} onClick={() => setView(FIT_VIEW)} className={ICON_BUTTON}>
+            <Icon name="RotateCcw" aria-hidden className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            aria-label="Open full screen"
+            title="Open full screen"
+            disabled={referenceImage.status !== "ready" && candidateImage.status !== "ready"}
+            onClick={(event) => open(0, event.currentTarget)}
+            className={ICON_BUTTON}
+          >
             <Icon name="Maximize2" aria-hidden className="size-3.5" />
           </button>
         </div>
@@ -878,6 +884,7 @@ function Stage(props: StageProps) {
         </div>
       </div>
       <ModeControls {...props} pane={pane} image={image} />
+      {viewer}
     </div>
   );
 }

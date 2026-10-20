@@ -31,6 +31,7 @@ import { FOCUS_RING } from "./inputs";
 import { useImageUrl } from "./media";
 import { FADE, SMOOTH_HEIGHT_CLASS, useEntrance, useSmoothHeight } from "./motion";
 import { EXACT_TIME, ICON_BUTTON } from "./projectKit";
+import { useGroupPicture, ViewerGroup } from "./viewer";
 
 /** Past this many stages the chain is a timeline at every width: a row would squeeze them. */
 const MAX_ROW_STAGES = 6;
@@ -278,14 +279,22 @@ function FileEvidence({ evidence }: { evidence: Extract<Evidence, { kind: "file"
   );
 }
 
-function ImageEvidence({ evidence }: { evidence: Extract<Evidence, { kind: "image" }> }) {
+function ImageEvidence({ evidence, order }: { evidence: Extract<Evidence, { kind: "image" }>; order: number }) {
   const image = useImageUrl(evidence.src);
   const caption = evidence.label ?? evidence.src;
+  const open = useGroupPicture(order, image.status === "ready" ? { url: image.url, alt: caption, caption } : null);
   return (
     <figure className="m-0 flex min-w-0 flex-col gap-1">
       <div className="flex h-56 min-w-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-surface-recessed">
         {image.status === "ready" ? (
-          <img src={image.url} alt={caption} decoding="async" className="block h-full w-auto max-w-full object-contain" />
+          <button
+            type="button"
+            aria-label={`View ${caption} full size`}
+            onClick={(event) => open(event.currentTarget)}
+            className={cn("flex size-full cursor-zoom-in items-center justify-center", FOCUS_RING)}
+          >
+            <img src={image.url} alt={caption} decoding="async" className="block h-full w-auto max-w-full object-contain" />
+          </button>
         ) : image.status === "loading" ? (
           <div role="status" aria-label={`Loading ${caption}`} className="size-full animate-pulse motion-reduce:animate-none" />
         ) : (
@@ -304,9 +313,9 @@ function ImageEvidence({ evidence }: { evidence: Extract<Evidence, { kind: "imag
   );
 }
 
-function EvidenceItem({ evidence }: { evidence: Evidence }) {
+function EvidenceItem({ evidence, order }: { evidence: Evidence; order: number }) {
   if (evidence.kind === "file") return <FileEvidence evidence={evidence} />;
-  if (evidence.kind === "image") return <ImageEvidence evidence={evidence} />;
+  if (evidence.kind === "image") return <ImageEvidence evidence={evidence} order={order} />;
   if (evidence.kind === "url") {
     return (
       <UrlLink
@@ -389,12 +398,14 @@ function StageDetail({ stage, id, requested, onClose }: { stage: Stage; id: stri
           {stage.receipt === "receipt" ? "No evidence attached: the outcome is as reported." : "No evidence attached."}
         </p>
       ) : (
-        <div className="flex min-w-0 flex-col gap-2">
-          <span className="text-[11px] font-medium uppercase leading-4 tracking-wide text-muted-foreground">Evidence</span>
-          {stage.evidence.map((evidence, index) => (
-            <EvidenceItem key={index} evidence={evidence} />
-          ))}
-        </div>
+        <ViewerGroup>
+          <div className="flex min-w-0 flex-col gap-2">
+            <span className="text-[11px] font-medium uppercase leading-4 tracking-wide text-muted-foreground">Evidence</span>
+            {stage.evidence.map((evidence, index) => (
+              <EvidenceItem key={index} evidence={evidence} order={index} />
+            ))}
+          </div>
+        </ViewerGroup>
       )}
     </div>
   );

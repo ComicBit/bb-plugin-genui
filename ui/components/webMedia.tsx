@@ -1,26 +1,28 @@
 // Photos from the web: ImageSearch (one photo found from a description) and
-// Gallery (paths, https URLs and searches mixed, in a grid or a strip), with a
-// shared full-screen viewer. Searches go to Wikimedia Commons through the
-// backend (web/lookups.ts); every found photo is credited with its author,
-// licence and Commons page, beside it and in the viewer.
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { createPortal } from "react-dom";
-import { experimental_usePluginId, UrlLink } from "@get-bb/plugin-sdk/app";
-import { Icon } from "@/components/ui/icon";
+// Gallery (paths, https URLs and searches mixed, in a grid or a strip), opened
+// full size in the shared viewer (viewer.tsx). Searches go to Wikimedia
+// Commons through the backend (web/lookups.ts); every found photo is credited
+// with its author, licence and Commons page, beside it and in the viewer.
+import { useCallback, useEffect, useRef, useState } from "react";
+import { UrlLink } from "@get-bb/plugin-sdk/app";
 import { cn } from "@/lib/utils";
 import { finiteNumber, isObject, list, optionalText, text, type Props } from "../values";
 import { useImageSearch, type FoundImage } from "../webLookups";
 import { ErrorLine } from "./display";
 import { useImageUrl, WebOffLine } from "./media";
-import { EASE_OUT_EXPO, RISE, useEntrance } from "./motion";
+import { RISE, useEntrance } from "./motion";
+import { useViewer, type Viewable } from "./viewer";
 
-/** One picture the viewer can show. */
-interface Viewable {
+/** A Gallery tile's picture, once it can be shown. */
+interface TilePicture {
   readonly url: string;
   readonly alt: string;
   readonly caption: string | null;
   readonly credit: FoundImage | null;
 }
+
+/** The viewer's credit line for a found photo. */
+const VIEWER_CREDIT = "justify-center text-white/60 [&_a:hover]:text-white";
 
 /** Photo credit: author and licence, linked to the file's Commons page (which holds the full attribution). */
 function Credit({ image, compact = false, className }: { image: FoundImage; compact?: boolean; className?: string }) {
@@ -90,8 +92,11 @@ export function ImageSearch({ props }: { props: Props }) {
   const found = useImageSearch(query);
   const image = useImageUrl(found?.ok ? found.image.url : null);
   const [broken, setBroken] = useState<string | null>(null);
-  const [viewing, setViewing] = useState(false);
-  const opener = useRef<HTMLButtonElement>(null);
+  const url = image.status === "ready" ? image.url : null;
+  const credit = found?.ok ? found.image : null;
+  const { open, viewer } = useViewer(
+    url === null || credit === null ? [] : [{ url, alt, caption: null, credit: <Credit image={credit} className={VIEWER_CREDIT} /> }],
+  );
 
   if (query === "") return <ErrorLine message="ImageSearch needs a description to search for" />;
   if (found !== null && !found.ok) {
@@ -101,9 +106,7 @@ export function ImageSearch({ props }: { props: Props }) {
   if (image.status === "failed") {
     return image.off ? <WebOffLine what={`Photo of “${query}”`} /> : <ErrorLine message={`Couldn't show the photo of “${query}”: ${image.error}`} />;
   }
-  const url = image.status === "ready" ? image.url : null;
   if (url !== null && broken === url) return <ErrorLine message={`Couldn't load the photo of “${query}”`} />;
-  const credit = found?.ok ? found.image : null;
 
   return (
     // data-bb-image-preview-ignore: these pictures have their own viewer; image-preview plugins must leave them alone.
@@ -113,10 +116,9 @@ export function ImageSearch({ props }: { props: Props }) {
           <span role="status" aria-label={`Finding a photo of ${query}`} className={cn("absolute inset-0", SKELETON)} />
         ) : (
           <button
-            ref={opener}
             type="button"
             aria-label={`${alt}. View full size`}
-            onClick={() => setViewing(true)}
+            onClick={(event) => open(0, event.currentTarget)}
             className={cn(ZOOM_BUTTON, "absolute inset-0")}
           >
             <Fill url={url} alt={alt} onFailed={() => setBroken(url)} />
@@ -130,17 +132,7 @@ export function ImageSearch({ props }: { props: Props }) {
           <Credit image={credit} />
         </figcaption>
       )}
-      {viewing && url !== null ? (
-        <Viewer
-          items={[{ url, alt, caption: null, credit }]}
-          index={0}
-          onIndex={() => {}}
-          onClose={() => {
-            setViewing(false);
-            opener.current?.focus();
-          }}
-        />
-      ) : null}
+      {viewer}
     </figure>
   );
 }
@@ -168,7 +160,7 @@ function entry(item: unknown): Entry | null {
 const STRIP_AFTER = 9;
 const GRID_GAP = "0.5rem";
 
-type TileState = { readonly status: "ready"; readonly view: Viewable } | { readonly status: "pending" } | { readonly status: "off" };
+type TileState = { readonly status: "ready"; readonly view: TilePicture } | { readonly status: "pending" } | { readonly status: "off" };
 
 function Tile({
   entry: { src, query, caption, alt },
@@ -238,8 +230,6 @@ export function Gallery({ props }: { props: Props }) {
   const shown = entries.flatMap((item, index) => (item === null ? [] : [{ item, index }]));
   const strip = columns === null && shown.length > STRIP_AFTER;
   const [states, setStates] = useState<ReadonlyMap<number, TileState>>(() => new Map());
-  const [viewing, setViewing] = useState<number | null>(null);
-  const opener = useRef<HTMLButtonElement | null>(null);
   const reporters = useRef(new Map<number, (state: TileState) => void>());
 
   /** A stable state callback per tile, so tiles don't re-report on every render. */
@@ -259,18 +249,26 @@ export function Gallery({ props }: { props: Props }) {
     return report;
   }, []);
 
-  if (items.length === 0) return <ErrorLine message="Gallery needs images: paths, https URLs or {query} searches" />;
-  // While streaming, the last item may not have its src or query yet.
-  const unusable = entries.findIndex((item, index) => item === null && index < entries.length - 1);
   const views = shown.flatMap(({ index }) => {
     const state = states.get(index);
     return state?.status === "ready" ? [{ index, view: state.view }] : [];
   });
+  const { open, viewer } = useViewer(
+    views.map(({ view: { url, alt, caption, credit } }): Viewable => ({
+      url,
+      alt,
+      caption,
+      credit: credit === null ? undefined : <Credit image={credit} className={VIEWER_CREDIT} />,
+    })),
+  );
+
+  if (items.length === 0) return <ErrorLine message="Gallery needs images: paths, https URLs or {query} searches" />;
+  // While streaming, the last item may not have its src or query yet.
+  const unusable = entries.findIndex((item, index) => item === null && index < entries.length - 1);
   const allOff = shown.length > 0 && shown.every(({ index }) => states.get(index)?.status === "off");
   const count = shown.length;
   const auto = count === 1 ? 1 : count === 2 || count === 4 ? 2 : 3;
   const template = `repeat(auto-fill,minmax(max(min(8rem,100%),calc((100% - ${(columns ?? auto) - 1} * ${GRID_GAP}) / ${columns ?? auto})),1fr))`;
-  const at = viewing === null ? -1 : views.findIndex((view) => view.index === viewing);
 
   return (
     <div data-bb-image-preview-ignore="" className="@container flex min-w-0 flex-col gap-2">
@@ -290,167 +288,13 @@ export function Gallery({ props }: { props: Props }) {
             <Tile
               entry={item}
               onState={reporter(index)}
-              onOpen={(button) => {
-                opener.current = button;
-                setViewing(index);
-              }}
+              onOpen={(button) => open(views.findIndex((view) => view.index === index), button)}
             />
           </div>
         ))}
       </div>
       {allOff ? <WebOffLine what="Gallery pictures" /> : null}
-      {at === -1 ? null : (
-        <Viewer
-          items={views.map(({ view }) => view)}
-          index={at}
-          onIndex={(next) => setViewing(views[next].index)}
-          onClose={() => {
-            setViewing(null);
-            opener.current?.focus();
-          }}
-        />
-      )}
+      {viewer}
     </div>
-  );
-}
-
-/** Horizontal travel that turns a drag into the next or previous picture. */
-const SWIPE_PX = 48;
-
-/**
- * Full-screen viewer: the picture whole, its caption and credit, previous and
- * next by buttons, arrow keys or a swipe, closed by Escape, the close button,
- * a tap outside the picture or a swipe down. Portaled to the body with the
- * plugin's scope attributes so its styles still apply.
- */
-function Viewer({
-  items,
-  index,
-  onIndex,
-  onClose,
-}: {
-  items: readonly Viewable[];
-  index: number;
-  onIndex: (index: number) => void;
-  onClose: () => void;
-}) {
-  const pluginId = experimental_usePluginId();
-  const dialog = useRef<HTMLDivElement>(null);
-  const close = useRef<HTMLButtonElement>(null);
-  const swipe = useRef<{ x: number; y: number; id: number } | null>(null);
-  const item = items[Math.min(index, items.length - 1)];
-  const many = items.length > 1;
-  const step = useCallback((by: number) => onIndex((index + by + items.length) % items.length), [index, items.length, onIndex]);
-
-  useLayoutEffect(() => {
-    close.current?.focus();
-    const root = document.documentElement;
-    const overflow = root.style.overflow;
-    root.style.overflow = "hidden";
-    const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (!reduced) dialog.current?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 180, easing: EASE_OUT_EXPO });
-    return () => {
-      root.style.overflow = overflow;
-    };
-  }, []);
-
-  const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onClose();
-    } else if (many && (event.key === "ArrowRight" || event.key === "ArrowLeft")) {
-      event.preventDefault();
-      step(event.key === "ArrowRight" ? 1 : -1);
-    } else if (event.key === "Tab") {
-      // Keep focus inside the dialog.
-      const focusable = [...(dialog.current?.querySelectorAll<HTMLElement>("button, a[href]") ?? [])];
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last?.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first?.focus();
-      }
-    }
-  };
-
-  const onPointerDown = (event: PointerEvent) => {
-    if (event.pointerType !== "mouse") swipe.current = { x: event.clientX, y: event.clientY, id: event.pointerId };
-  };
-  const onPointerUp = (event: PointerEvent) => {
-    const start = swipe.current;
-    swipe.current = null;
-    if (start === null || start.id !== event.pointerId) return;
-    const dx = event.clientX - start.x;
-    const dy = event.clientY - start.y;
-    if (many && Math.abs(dx) > SWIPE_PX && Math.abs(dx) > Math.abs(dy) * 1.5) step(dx < 0 ? 1 : -1);
-    else if (dy > SWIPE_PX * 2 && Math.abs(dy) > Math.abs(dx) * 1.5) onClose();
-  };
-
-  const navButton =
-    "flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-full bg-white/10 text-white transition-colors hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70";
-
-  return createPortal(
-    <div data-bb-plugin={pluginId} data-bb-plugin-root="" data-bb-portaled-overlay="" data-bb-image-preview-ignore="">
-      <div
-        ref={dialog}
-        role="dialog"
-        aria-modal="true"
-        aria-label={item.caption ?? (item.alt || "Picture")}
-        onKeyDown={onKeyDown}
-        onPointerDown={onPointerDown}
-        onPointerUp={onPointerUp}
-        onPointerCancel={() => {
-          swipe.current = null;
-        }}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) onClose();
-        }}
-        className="fixed inset-0 z-[2147483000] flex touch-none select-none flex-col text-white backdrop-blur-md"
-        style={{ background: "rgb(0 0 0 / 0.94)" }}
-      >
-        <div className="flex shrink-0 items-center justify-between gap-3 px-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
-          <span className="text-xs tabular-nums text-white/70">{many ? `${index + 1} / ${items.length}` : ""}</span>
-          <button ref={close} type="button" aria-label="Close" onClick={onClose} className={navButton}>
-            <Icon name="X" className="size-5" />
-          </button>
-        </div>
-        <div
-          className="flex min-h-0 flex-1 items-center justify-center gap-2 px-2 py-3"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) onClose();
-          }}
-        >
-          {many ? (
-            <button type="button" aria-label="Previous picture" onClick={() => step(-1)} className={cn(navButton, "max-sm:hidden")}>
-              <Icon name="ChevronLeft" className="size-5" />
-            </button>
-          ) : null}
-          <img
-            key={item.url}
-            src={item.url}
-            alt={item.alt}
-            draggable={false}
-            className="block max-h-full min-w-0 max-w-full rounded-md object-contain"
-          />
-          {many ? (
-            <button type="button" aria-label="Next picture" onClick={() => step(1)} className={cn(navButton, "max-sm:hidden")}>
-              <Icon name="ChevronRight" className="size-5" />
-            </button>
-          ) : null}
-        </div>
-        {item.caption === null && item.credit === null ? null : (
-          <div className="mx-auto flex w-full max-w-2xl shrink-0 flex-col gap-1 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] text-center">
-            {item.caption === null ? null : <p className="text-sm leading-5 text-white/90">{item.caption}</p>}
-            {item.credit === null ? null : (
-              <Credit image={item.credit} className="justify-center text-white/60 [&_a:hover]:text-white" />
-            )}
-          </div>
-        )}
-      </div>
-    </div>,
-    document.body,
   );
 }

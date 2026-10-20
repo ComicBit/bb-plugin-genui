@@ -21,8 +21,9 @@ import { isBinding, list, nodes, optionalText, type Props } from "../values";
 import { cardOptions, followUpPrompts, sameColor, swatchColors, togglePick, type CardOption } from "./choose-logic";
 import { CheckMark, ErrorLine } from "./display";
 import { CAPTION, SentLine, useClosedChoices } from "./inputs";
-import { useImageUrl } from "./media";
+import { useImageUrl, type ImageState } from "./media";
 import { RISE, useEntrance } from "./motion";
+import { ExpandButton, useGroupPicture, ViewerGroup } from "./viewer";
 
 /** Selectable tiles get an offset ring, so focus never reads as selection. */
 const TILE_FOCUS =
@@ -53,8 +54,7 @@ function useRovingRadios(pick: (index: number) => void) {
 // ── OptionCards ──────────────────────────────────────────────────────────────
 
 /** An option's picture, read like every image through the runtime (files and the https proxy). */
-function OptionPicture({ src }: { src: string }) {
-  const picture = useImageUrl(src);
+function OptionPicture({ src, picture }: { src: string; picture: ImageState }) {
   const [decoded, setDecoded] = useState<{ readonly url: string; readonly ok: boolean } | null>(null);
   const url = picture.status === "ready" ? picture.url : null;
   const result = url !== null && decoded?.url === url ? decoded : null;
@@ -110,52 +110,64 @@ function SelectionMark({ checked, multiple, onImage }: { checked: boolean; multi
 
 function OptionCard({
   option,
+  order,
   checked,
   multiple,
   tabIndex,
   onSelect,
 }: {
   option: CardOption;
+  order: number;
   checked: boolean;
   multiple: boolean;
   tabIndex: number;
   onSelect: () => void;
 }) {
-  const rise = useEntrance<HTMLButtonElement>(RISE);
+  const rise = useEntrance<HTMLDivElement>(RISE);
   const icon = option.icon === null ? null : resolveIconName(option.icon);
+  const picture = useImageUrl(option.image);
+  const view = useGroupPicture(
+    order,
+    picture.status === "ready" ? { url: picture.url, alt: option.title, caption: option.detail === null ? option.title : `${option.title} · ${option.detail}` } : null,
+  );
   return (
-    <button
-      ref={rise}
-      type="button"
-      role={multiple ? "checkbox" : "radio"}
-      aria-checked={checked}
-      tabIndex={tabIndex}
-      onClick={onSelect}
-      className={cn(
-        "relative flex min-w-0 cursor-pointer touch-manipulation flex-col overflow-hidden rounded-lg border bg-background text-left transition-[border-color,box-shadow,background-color] duration-150 motion-reduce:transition-none",
-        TILE_FOCUS,
-        checked
-          ? "border-primary shadow-[0_0_0_1px_var(--primary)]"
-          : "border-border hover:border-foreground/25 [@media(hover:hover)]:hover:bg-surface-recessed/50",
-      )}
-    >
-      {option.image === null ? null : <OptionPicture src={option.image} />}
-      <span className="flex min-w-0 flex-1 items-start gap-2.5 px-3 py-2.5">
-        {icon === null ? null : (
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-surface-recessed text-foreground">
-            <Icon name={icon} aria-hidden className="size-4" />
-          </span>
+    // The tile is the option's radio, so the picture's own full-size button sits beside it, over its corner.
+    <div ref={rise} className="relative flex min-w-0 flex-col">
+      <button
+        type="button"
+        role={multiple ? "checkbox" : "radio"}
+        aria-checked={checked}
+        tabIndex={tabIndex}
+        onClick={onSelect}
+        className={cn(
+          "relative flex min-w-0 flex-1 cursor-pointer touch-manipulation flex-col overflow-hidden rounded-lg border bg-background text-left transition-[border-color,box-shadow,background-color] duration-150 motion-reduce:transition-none",
+          TILE_FOCUS,
+          checked
+            ? "border-primary shadow-[0_0_0_1px_var(--primary)]"
+            : "border-border hover:border-foreground/25 [@media(hover:hover)]:hover:bg-surface-recessed/50",
         )}
-        <span className={cn("flex min-w-0 flex-1 flex-col gap-0.5", icon !== null && "self-center")}>
-          <span className="text-sm font-medium leading-5 text-foreground [overflow-wrap:anywhere]">{option.title}</span>
-          {option.detail === null ? null : (
-            <span className="text-xs leading-4 text-muted-foreground [overflow-wrap:anywhere]">{option.detail}</span>
+      >
+        {option.image === null ? null : <OptionPicture src={option.image} picture={picture} />}
+        <span className="flex min-w-0 flex-1 items-start gap-2.5 px-3 py-2.5">
+          {icon === null ? null : (
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-surface-recessed text-foreground">
+              <Icon name={icon} aria-hidden className="size-4" />
+            </span>
           )}
+          <span className={cn("flex min-w-0 flex-1 flex-col gap-0.5", icon !== null && "self-center")}>
+            <span className="text-sm font-medium leading-5 text-foreground [overflow-wrap:anywhere]">{option.title}</span>
+            {option.detail === null ? null : (
+              <span className="text-xs leading-4 text-muted-foreground [overflow-wrap:anywhere]">{option.detail}</span>
+            )}
+          </span>
+          {option.image === null ? <SelectionMark checked={checked} multiple={multiple} onImage={false} /> : null}
         </span>
-        {option.image === null ? <SelectionMark checked={checked} multiple={multiple} onImage={false} /> : null}
-      </span>
-      {option.image === null ? null : <SelectionMark checked={checked} multiple={multiple} onImage />}
-    </button>
+        {option.image === null ? null : <SelectionMark checked={checked} multiple={multiple} onImage />}
+      </button>
+      {option.image === null || picture.status !== "ready" ? null : (
+        <ExpandButton label={`View ${option.title} full size`} onOpen={view} className="left-2 top-2" />
+      )}
+    </div>
   );
 }
 
@@ -193,28 +205,31 @@ export function OptionCards({ props }: { props: Props }) {
           {label}
         </span>
       )}
-      <div
-        ref={group}
-        role={multiple ? "group" : "radiogroup"}
-        aria-labelledby={label === null ? undefined : labelId}
-        aria-label={label === null ? binding.name : undefined}
-        onKeyDown={multiple ? undefined : onKeyDown}
-        className="grid min-w-0 gap-2"
-        style={grid}
-      >
-        {options.map((option, index) => (
-          <OptionCard
-            // Options are positional; the same value may repeat.
-            key={index}
-            option={option}
-            checked={multiple ? picked.includes(option.value) : index === selected}
-            multiple={multiple}
-            // Roving focus for radios: Tab lands on the selected option, else the first.
-            tabIndex={multiple || index === Math.max(0, selected) ? 0 : -1}
-            onSelect={() => setValue(binding.name, multiple ? togglePick(picked, option.value, values) : option.value)}
-          />
-        ))}
-      </div>
+      <ViewerGroup>
+        <div
+          ref={group}
+          role={multiple ? "group" : "radiogroup"}
+          aria-labelledby={label === null ? undefined : labelId}
+          aria-label={label === null ? binding.name : undefined}
+          onKeyDown={multiple ? undefined : onKeyDown}
+          className="grid min-w-0 gap-2"
+          style={grid}
+        >
+          {options.map((option, index) => (
+            <OptionCard
+              // Options are positional; the same value may repeat.
+              key={index}
+              option={option}
+              order={index}
+              checked={multiple ? picked.includes(option.value) : index === selected}
+              multiple={multiple}
+              // Roving focus for radios: Tab lands on the selected option, else the first.
+              tabIndex={multiple || index === Math.max(0, selected) ? 0 : -1}
+              onSelect={() => setValue(binding.name, multiple ? togglePick(picked, option.value, values) : option.value)}
+            />
+          ))}
+        </div>
+      </ViewerGroup>
     </div>
   );
 }

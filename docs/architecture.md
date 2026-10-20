@@ -183,8 +183,8 @@ the instructions list it.
   heatmap; stacked), Sparkline, Progress, Gauge, SegmentedBar, Steps,
   Timeline, Calendar, CalendarHeatmap, Tree, Code, Snippet, Diff, Diagram
   (mermaid, drawn in the Excalidraw style; nodes with `details` open an
-  explanation when clicked)
-- Media: ImageSearch, Gallery (with a full-size viewer), Map, Hotspots
+  explanation when clicked; pinch or ⌘/Ctrl + scroll zooms it in place)
+- Media: ImageSearch, Gallery, Map, Hotspots
 - Inputs: Slider, Stepper, Toggle, Choice (a vertical list when its options
   are long), Radio, Select, Checklist, ListEditor, Input, TextArea, DateInput,
   Rating, OptionCards, Swatches, EditableTable, FollowUps, Button (primary,
@@ -274,19 +274,41 @@ so it survives BB remounting the row as the user scrolls. `ui_examples`
 also says, for each tool-backed component, the commands that save the file
 it reads.
 
+Every picture a component shows (Image, ImageSearch, Gallery, Entity,
+Hotspots, OptionCards, Compare, Acceptance and Provenance evidence) opens in
+one full-screen viewer (`ui/components/viewer.tsx`): a press on the picture,
+or, where pressing it already does something (Hotspots' pins, an option
+card's selection, an Entity card's detail, Compare's wipe), an expand button
+at its corner (Compare's in its zoom controls). The viewer fits the picture,
+then zooms with the wheel, a trackpad pinch, two fingers or a double tap, and
+pans by dragging; arrows, buttons or a swipe step through the component's
+pictures; Escape, the close button, a tap beside the picture or a swipe down
+closes it. Its caption is the picture's caption or alt, and an Image of a
+file can be opened in BB from there. Touch goes through touch events, not
+pointer events, so a gesture the browser starts (a scroll under two
+fingers) can't cancel it, and cancelling them is what keeps iOS from zooming
+the whole page. The zoom and pan geometry is `zoomMath.ts`, shared with
+Compare.
+
 Diagrams look like Excalidraw (`ui/components/sketch.ts`): Mermaid's
 hand-drawn look in Excalifont on Excalidraw's palette, with decisions,
 data stores, start/end points and events coloured by shape. Under BB's dark
 theme the palette is Excalidraw's dark one, computed from its
-`invert(93%) hue-rotate(180deg)` filter, so BB's full-screen diagram view is
-dark too. A diagram has no frame or canvas of its own: it is drawn on the
-card it sits in, its edge labels take that colour (read from the page when
-it renders), and BB's diagram toolbar (source, zoom, copy) is a quiet row of
-icons at its top right. A diagram that brings its own front matter or init
-directive is drawn as written. The font's Latin subset (25 KB, SIL Open Font
-License, `assets/fonts/`) is sent once per page by the `sketch_font` RPC;
-diagrams wait up to 1.5 s for it, since Mermaid measures text as it lays
-them out.
+`invert(93%) hue-rotate(180deg)` filter. A diagram has no frame or canvas of
+its own: it is drawn on the card it sits in, its edge labels take that
+colour (read from the page when it renders), and BB's diagram toolbar
+(source, open, copy) is a quiet row of icons at its top right. Two fingers
+or ⌘/Ctrl + scroll zoom it in place (one finger then pans it, and "Reset
+zoom" fits it again); at its fitted size one finger scrolls the thread.
+BB's open button shows it in the plugin's own full-screen view
+(`DiagramViewer`), not BB's dialog, whose pinch listeners attach before the
+dialog mounts, so on a phone it only pans; there a node with `details` opens
+them in a popup over the drawing that folds to its title, and a tap
+elsewhere dismisses the popup, not the view. A diagram that brings its own
+front matter or init directive is drawn as written. The font's Latin subset
+(25 KB, SIL Open Font License, `assets/fonts/`) is sent once per page by the
+`sketch_font` RPC; diagrams wait up to 1.5 s for it, since Mermaid measures
+text as it lays them out.
 
 Every ChatGPT component the [OpenUI teardown](https://www.openui.com/blog/how-chatgpt-intelligent-ui-works)
 describes has a counterpart, except the ones that need paid data services
