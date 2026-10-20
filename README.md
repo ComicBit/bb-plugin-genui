@@ -4,9 +4,9 @@
 
 **Your agents answer with charts, diagrams, maps, plans and forms you can use, drawn right in the chat.**
 
-<img src="docs/media/carousel.webp" width="800" alt="A carousel of components rendered in BB: a funnel chart, a hand-drawn flow diagram, a route on a map, a weighted decision, a kanban board, a roadmap, a transcript aligned word by word, an image comparison, a code review, a log viewer, a quiz and place cards.">
+<img src="docs/media/carousel.webp" width="800" alt="A carousel of components rendered in BB: an animated 3D solar system, a funnel chart, a hand-drawn flow diagram, a glass prism splitting light, a route on a map, a weighted decision, light trails from a GPU shader, a kanban board, a roadmap, a glTF chess pawn lit by an HDR, a transcript aligned word by word, an image comparison, a code review, a raymarched shader, a test report, a quiz and place cards.">
 
-<sub>Every frame is a real component, rendered by BB from an example in [`gallery/`](gallery).</sub>
+<sub>Every frame is a real component, rendered by BB from an example in [`gallery/`](gallery); the 3D slides are captured moving.</sub>
 
 </div>
 
