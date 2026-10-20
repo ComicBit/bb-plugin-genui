@@ -288,7 +288,13 @@ file can be opened in BB from there. Touch goes through touch events, not
 pointer events, so a gesture the browser starts (a scroll under two
 fingers) can't cancel it, and cancelling them is what keeps iOS from zooming
 the whole page. The zoom and pan geometry is `zoomMath.ts`, shared with
-Compare.
+Compare. Every surface a finger drags or pinches (the viewer, inline
+diagrams, Compare, Map, an orbiting Scene or Shader) carries BB's
+`data-no-sidebar-swipe` and `data-no-secondary-panel-swipe` (`NO_BB_SWIPE`):
+BB's mobile swipes otherwise take a sideways pan, or the outer finger of a
+pinch, and slide a panel over the thread, so the next drag never reaches the
+drawing. An inline diagram draws its zoom again whenever BB replaces the
+drawn block, so the zoom survives BB re-rendering the row.
 
 Diagrams look like Excalidraw (`ui/components/sketch.ts`): Mermaid's
 hand-drawn look in Excalifont on Excalidraw's palette, with decisions,

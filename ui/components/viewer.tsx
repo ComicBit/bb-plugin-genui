@@ -102,6 +102,14 @@ interface GestureEvent extends UIEvent {
 }
 
 /**
+ * Attributes that keep BB's mobile sidebar and side-panel swipes off an
+ * element: BB's swipe recognizers skip touches that start inside them. Every
+ * surface a finger drags or pinches needs them, or a sideways pan (or the
+ * outer finger of a pinch) opens a panel instead.
+ */
+export const NO_BB_SWIPE = { "data-no-sidebar-swipe": "", "data-no-secondary-panel-swipe": "" } as const;
+
+/**
  * Pan and zoom of `surface`'s content. The caller says where the pane is and
  * draws; the view lives here, in a ref, so a gesture draws every frame
  * without rendering React. `zoomed` is state, for touch-action and controls.
@@ -303,6 +311,7 @@ export function usePanZoom(surface: HTMLElement | null, options: PanZoomOptions)
     };
 
     const touch = { passive: false } as const;
+    for (const [name, value] of Object.entries(NO_BB_SWIPE)) surface.setAttribute(name, value);
     surface.addEventListener("touchstart", onTouchStart, touch);
     surface.addEventListener("touchmove", onTouchMove, touch);
     surface.addEventListener("touchend", onTouchEnd);
@@ -330,6 +339,7 @@ export function usePanZoom(surface: HTMLElement | null, options: PanZoomOptions)
       surface.removeEventListener("wheel", onWheel);
       surface.removeEventListener("gesturestart", onGestureStart);
       surface.removeEventListener("gesturechange", onGestureChange);
+      for (const name of Object.keys(NO_BB_SWIPE)) surface.removeAttribute(name);
     };
   }, [surface, show]);
 

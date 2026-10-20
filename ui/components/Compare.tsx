@@ -38,7 +38,7 @@ import { FIELD, FOCUS_RING } from "./inputs";
 import { imageSource, useImageUrl } from "./media";
 import { Frame, Heading, Quiet, Segmented, useOpenUrl } from "./perfKit";
 import { ICON_BUTTON } from "./projectKit";
-import { useViewer } from "./viewer";
+import { NO_BB_SWIPE, useViewer } from "./viewer";
 import { clampView, FIT_VIEW, panBy, pinchView, placeImage, wheelZoomFactor, zoomAround, type Point, type View } from "./zoomMath";
 
 type Mode = "side" | "wipe" | "overlay" | "difference";
@@ -871,6 +871,7 @@ function Stage(props: StageProps) {
           role="group"
           aria-roledescription="image comparison"
           aria-label={`${MODES.find((option) => option.value === mode)?.label}: ${reference.label} and ${candidateLabel}, zoom ${percent}%. Plus and minus zoom, 0 fits, arrow keys pan when zoomed${mode === "wipe" ? " or move the divider" : ""}.`}
+          {...NO_BB_SWIPE}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerEnd}

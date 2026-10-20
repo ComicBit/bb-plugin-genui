@@ -1,7 +1,7 @@
 // Code, file snippets, diffs and diagrams drawn by BB's own viewers, so they
 // carry the user's code theme, highlighting and gutters exactly like code
 // elsewhere in BB.
-import { type MouseEvent, type ReactNode, type RefObject, useCallback, useLayoutEffect, useRef, useState } from "react";
+import { type MouseEvent, type ReactNode, type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
   experimental_Diff as HostDiff,
@@ -335,6 +335,16 @@ export function Diagram({ props }: { props: Props }) {
     plainWheel: false,
     doubleTap: false,
   });
+  const { redraw } = zoom;
+  // BB's Markdown can replace the drawn block when its row renders again (a layout change,
+  // a panel opening), dropping the transform set on the old frame; draw the view again on
+  // the new one, so a zoomed diagram stays zoomed and keeps panning.
+  useEffect(() => {
+    if (surface === null) return;
+    const observer = new MutationObserver(() => redraw());
+    observer.observe(surface, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [surface, redraw]);
   if (source === "") return <ErrorLine message="This diagram has no Mermaid source" />;
   const details = parseDetails(props.details);
   // A fence longer than any backtick run in the source keeps it one block.

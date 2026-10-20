@@ -18,6 +18,7 @@ import { ErrorLine } from "./display";
 import { keepSnapshot, resolveColor, snapshot, useFrameLoop, useGpuSlot } from "./gpu";
 import { MAX_PITCH, MAX_ZOOM, MIN_ZOOM, type Orbit } from "./sceneMath";
 import { SceneWorld, type Hint, type LabelSize } from "./sceneWorld";
+import { NO_BB_SWIPE } from "./viewer";
 
 const DEFAULT_HEIGHT = 320;
 const MIN_HEIGHT = 120;
@@ -275,6 +276,7 @@ export function Scene({ props }: { props: Props }) {
         ref={container}
         role="img"
         aria-label="3D scene"
+        {...(orbitable ? NO_BB_SWIPE : {})}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerEnd}

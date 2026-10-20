@@ -29,6 +29,7 @@ import {
   type View,
 } from "./mapMath";
 import { RISE, useEntrance } from "./motion";
+import { NO_BB_SWIPE } from "./viewer";
 
 interface Place {
   readonly name: string;
@@ -436,6 +437,7 @@ export function MapView({ props }: { props: Props }) {
             aria-label={`Map of ${count} ${count === 1 ? "place" : "places"}. Arrow keys pan, plus and minus zoom, 0 shows every place.`}
             tabIndex={0}
             onKeyDown={onKeyDown}
+            {...NO_BB_SWIPE}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerEnd}

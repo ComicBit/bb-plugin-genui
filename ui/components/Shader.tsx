@@ -11,6 +11,7 @@ import { finiteNumber, isBinding, isObject, list, text, type Props } from "../va
 import { ErrorLine } from "./display";
 import { keepSnapshot, snapshot, useFrameLoop, useGpuSlot } from "./gpu";
 import { ShaderGl, type Blend, type ShaderFrame } from "./shaderGl";
+import { NO_BB_SWIPE } from "./viewer";
 
 const DEFAULT_HEIGHT = 320;
 /** Device pixels per CSS pixel at most: a raymarcher at 3x costs 2.25x the pixels of 2x for little gain. */
@@ -319,6 +320,7 @@ export function Shader({ props }: { props: Props }) {
         className={cn("relative w-full min-w-0 select-none", orbit && "cursor-grab active:cursor-grabbing")}
         // As in Scene: vertical swipes still scroll the thread on touch; horizontal drags orbit.
         style={{ height, touchAction: orbit ? "pan-y" : "auto" }}
+        {...(orbit ? NO_BB_SWIPE : {})}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
