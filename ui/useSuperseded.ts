@@ -4,7 +4,7 @@
 // thread event can add or drop a user message, so a streaming reply costs
 // nothing. Works for blocks scrolled out of BB's virtualized timeline too,
 // since it reads the thread from the server, not the DOM.
-import { useCallback, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { useSdk, type PluginBrowserBbSdk as Sdk } from "@get-bb/plugin-sdk/app";
 import { affectsConversation, hasLaterUserMessage, type OutlineItem } from "./supersession";
 
@@ -114,14 +114,70 @@ class ThreadOutlines {
           entry.items = items.map(({ id, role }) => ({ id, role }));
           for (const listener of entry.listeners) listener();
         },
-        // A failed read keeps the last outline; the next change reads again.
-        () => undefined,
+        // A failed read keeps the last outline; the next change reads again. Without one,
+        // replies count as unanswered, as they did before any outline: not left provisional.
+        () => {
+          if (entry.items !== null || entry.abort.signal.aborted) return;
+          entry.items = [];
+          for (const listener of entry.listeners) listener();
+        },
       )
       .finally(() => {
         entry.fetching = false;
         if (entry.stale && !entry.abort.signal.aborted) this.schedule(entry, threadId);
       });
   }
+}
+
+/**
+ * Replies seen answered, by message id, kept across pages: an answer doesn't
+ * go away, so a thread opened again (on a fresh page, or after its outline
+ * was released) folds their choices on the first frame, at the height the
+ * block settled at, instead of when the outline arrives.
+ */
+const ANSWERED_KEY = "bb.genui.answered";
+const MAX_ANSWERED = 2000;
+/** A thread opened again confirms many replies at once: they are written out together. */
+const SAVE_DELAY_MS = 500;
+let answered: Set<string> | null = null;
+let saveTimer: number | undefined;
+
+function answeredReplies(): Set<string> {
+  if (answered === null) {
+    answered = new Set();
+    try {
+      const saved: unknown = JSON.parse(localStorage.getItem(ANSWERED_KEY) ?? "[]");
+      if (Array.isArray(saved)) for (const id of saved) if (typeof id === "string") answered.add(id);
+    } catch {
+      // Unavailable or damaged: nothing is remembered.
+    }
+  }
+  return answered;
+}
+
+function rememberAnswered(messageId: string, isAnswered: boolean): void {
+  const replies = answeredReplies();
+  if (replies.has(messageId) === isAnswered) return;
+  if (isAnswered) replies.add(messageId);
+  else replies.delete(messageId);
+  while (replies.size > MAX_ANSWERED) replies.delete(replies.values().next().value!);
+  saveTimer ??= window.setTimeout(() => {
+    saveTimer = undefined;
+    try {
+      localStorage.setItem(ANSWERED_KEY, JSON.stringify([...replies]));
+    } catch {
+      // Storage full or unavailable: remembered for this page only.
+    }
+  }, SAVE_DELAY_MS);
+}
+
+/** What the outline says of a reply: not read yet, not listed (a nested agent's), answered or not. */
+type OutlineVerdict = "pending" | "unlisted" | "answered" | "open";
+
+function verdictOf(items: readonly OutlineItem[] | null, messageId: string): OutlineVerdict {
+  if (items === null) return "pending";
+  const later = hasLaterUserMessage(items, messageId);
+  return later === null ? "unlisted" : later ? "answered" : "open";
 }
 
 /** The SDK client is stable for the plugin's lifetime; this keeps one store per client. */
@@ -139,15 +195,22 @@ function outlinesFor(sdk: Sdk): ThreadOutlines {
 /**
  * True once thread `threadId` has a user message after message `messageId`
  * (a conversation row id: the `message.id` BB hands to slots, or a timeline
- * row's `data-timeline-row-id`). False until the outline loads and while the
- * reply is the latest exchange. When the outline doesn't list the message
+ * row's `data-timeline-row-id`); false while the reply is the latest
+ * exchange. Null while the outline is still being read for a reply not seen
+ * answered before (on this page or an earlier one): the block doesn't know
+ * yet whether its choices stay. When the outline doesn't list the message
  * (a nested agent's reply), keeps the last known answer, initially false.
  */
-export function useSuperseded(threadId: string, messageId: string): boolean {
+export function useSuperseded(threadId: string, messageId: string): boolean | null {
   const store = outlinesFor(useSdk());
   const subscribe = useCallback((listener: () => void) => store.listen(threadId, listener), [store, threadId]);
-  const verdict = useSyncExternalStore(subscribe, () => hasLaterUserMessage(store.items(threadId), messageId));
-  const known = useRef(false);
-  if (verdict !== null) known.current = verdict;
-  return known.current;
+  const verdict = useSyncExternalStore(subscribe, () => verdictOf(store.items(threadId), messageId));
+  const known = useRef<boolean | null>(null);
+  if (verdict === "answered" || verdict === "open") known.current = verdict === "answered";
+  useEffect(() => {
+    if (verdict === "answered" || verdict === "open") rememberAnswered(messageId, verdict === "answered");
+  }, [verdict, messageId]);
+  if (known.current !== null) return known.current;
+  if (answeredReplies().has(messageId)) return true;
+  return verdict === "pending" ? null : false;
 }

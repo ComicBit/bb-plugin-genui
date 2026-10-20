@@ -9,6 +9,28 @@ export type ImageUrl =
   | { readonly ok: true; readonly url: string }
   | { readonly ok: false; readonly error: string; readonly off?: boolean };
 
+/** A picture's natural size, in CSS px. */
+export interface ImageSize {
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * Reads an image (see `UiRuntime.loadImage`), and answers at once what the
+ * page already knows about one, so a block BB remounts (scrolled back to, or
+ * its thread opened again) opens at its final size instead of growing when
+ * its pictures arrive.
+ */
+export interface ImageLoader {
+  (src: string): Promise<ImageUrl>;
+  /** `src` as this page already read it; null when it hasn't (yet). */
+  peek(src: string): ImageUrl | null;
+  /** The natural size `src` last decoded at, in this page or an earlier one; null when it never did. */
+  size(src: string): ImageSize | null;
+  /** Remembers the natural size `src` decoded at, for `size`. */
+  rememberSize(src: string, size: ImageSize): void;
+}
+
 /** A text file read for a component, or a user-facing reason it couldn't be. */
 export type TextFile = { readonly ok: true; readonly text: string } | { readonly ok: false; readonly error: string };
 
@@ -30,7 +52,13 @@ export interface UiRuntime {
    * for every image rather than putting an https URL in an <img>. Null where
    * the surface can't load images. Never rejects.
    */
-  loadImage: ((src: string) => Promise<ImageUrl>) | null;
+  loadImage: ImageLoader | null;
+  /**
+   * Marks something the UI shows as still arriving (an image being read):
+   * until every mark is released, the block keeps the height it last
+   * settled at and remembers no other (reservedHeight.ts). Returns the release.
+   */
+  holdHeight(): () => void;
   /**
    * Reads a text file of the thread (workspace, `$BB_THREAD_STORAGE/…` or
    * /tmp; the gallery's own files in the gallery), for components that show

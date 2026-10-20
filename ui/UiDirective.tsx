@@ -73,7 +73,7 @@ function StoredUi({
   const compiled = useMemo(() => compile(source), [source]);
   const send = useCallback((text: string) => sendThroughComposer(composer, text), [composer]);
   const data = useLoadedData({ threadId }, compiled.program);
-  const loadImage = useImageLoader({ threadId });
+  const loadImage = useImageLoader({ threadId }, `bb.genui.state:${id}`);
   const readText = useTextLoader({ threadId });
   const loadAudio = useAudioLoader({ threadId });
   const loadAsset = useAssetLoader({ threadId });

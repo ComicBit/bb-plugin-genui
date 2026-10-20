@@ -27,12 +27,13 @@ import {
 } from "@/components/ui/dialog";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
-import { CardDepthContext, useUiRuntime, type ImageUrl } from "../runtime";
+import { CardDepthContext, useUiRuntime } from "../runtime";
 import { list, optionalText, text, type Props } from "../values";
 import { KeyValue } from "./content";
 import { keyValuePairs } from "./content-model";
 import { ErrorLine } from "./display";
 import { CAPTION, FOCUS_RING } from "./inputs";
+import { decodedSize, useReadImage } from "./media";
 import { FADE, reducedMotion, RISE, SMOOTH_HEIGHT_CLASS, useEntrance, useSmoothHeight } from "./motion";
 import {
   domainOf,
@@ -61,25 +62,12 @@ type Picture =
 function usePicture(src: string): Picture {
   const { loadImage } = useUiRuntime();
   const ref = useMemo(() => imageRef(src), [src]);
-  // Tagged with its src, so a changed src never shows the previous image.
-  const [loaded, setLoaded] = useState<{ readonly src: string; readonly image: ImageUrl } | null>(null);
-  useEffect(() => {
-    if (ref.kind !== "load" || loadImage === null) return;
-    let live = true;
-    void loadImage(ref.src).then((image) => {
-      if (live) setLoaded({ src: ref.src, image });
-    });
-    return () => {
-      live = false;
-    };
-  }, [ref, loadImage]);
+  const image = useReadImage(ref.kind === "load" ? ref.src : null);
   if (ref.kind === "none") return { status: "none" };
   if (ref.kind === "invalid") return { status: "error", error: ref.error };
   if (loadImage === null) return { status: "error", error: `Images can't be shown here: ${ref.src}` };
-  if (loaded === null || loaded.src !== ref.src) return { status: "loading" };
-  return loaded.image.ok
-    ? { status: "ready", url: loaded.image.url }
-    : { status: "error", error: `Couldn't show ${ref.src}: ${loaded.image.error}` };
+  if (image === null) return { status: "loading" };
+  return image.ok ? { status: "ready", url: image.url } : { status: "error", error: `Couldn't show ${ref.src}: ${image.error}` };
 }
 
 /** Opens `href` through the runtime's OpenUrl action, which owns the scheme check and the user's browser choice. */
@@ -561,6 +549,10 @@ export function Hotspots({ props }: { props: Props }) {
   const id = useId();
   const src = text(props.image);
   const picture = usePicture(src);
+  const { loadImage } = useUiRuntime();
+  const ref = useMemo(() => imageRef(src), [src]);
+  // The natural size it decoded at before, here or on an earlier page.
+  const remembered = ref.kind === "load" ? (loadImage?.size(ref.src) ?? null) : null;
   const items = list(props.points);
   const { points, problems } = useMemo(() => hotspotPoints(items), [items]);
   const [selected, setSelected] = useState<number | null>(null);
@@ -584,12 +576,15 @@ export function Hotspots({ props }: { props: Props }) {
   const settle = (ok: boolean, img: HTMLImageElement) => {
     if (url === null || natural?.url === url) return;
     const { naturalWidth, naturalHeight } = img;
+    const own = ok ? decodedSize(img) : null;
+    if (own !== null && ref.kind === "load") loadImage?.rememberSize(ref.src, own);
     // An SVG without width/height has no ratio of its own: keep the frame's.
     setNatural({ url, ratio: !ok ? null : naturalWidth > 0 && naturalHeight > 0 ? naturalWidth / naturalHeight : 16 / 9 });
   };
   const failed = size !== null && size.ratio === null;
   const ready = size !== null && size.ratio !== null;
-  const ratio = size?.ratio ?? 16 / 9;
+  // Until it decodes, the ratio it had before, so the frame and its pins don't change shape.
+  const ratio = size?.ratio ?? (remembered === null ? 16 / 9 : remembered.width / remembered.height);
   const active = points.some((point) => point.number === selected) ? selected : null;
   const { open, viewer } = useViewer(
     url === null || !ready ? [] : [{ url, alt: points.length === 0 ? "Picture" : `Picture with ${points.map((point) => `${point.number}. ${point.title}`).join(", ")}`, caption: null }],

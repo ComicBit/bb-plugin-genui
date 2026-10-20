@@ -4,6 +4,12 @@ What changed in each version of the Generative UI plugin for BB. Update an insta
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- A thread opened again (after a while, on a fresh page, or over a slow remote connection) no longer shows gaps under its pictures that then snap shut. A block BB mounts again shows the pictures it already read in this page instead of reading them again, an Image is laid out at its picture's last natural size before the picture arrives (Hotspots keeps its last shape the same way; SVGs still lay themselves out), and a block holds the height it settled at until its pictures arrive instead of giving up after 4 seconds and remembering the placeholder's height.
+- The choices of a reply already answered no longer show for a moment and then fold when a thread is opened again more than 10 seconds after it was left: answered replies are remembered across pages.
+
 ## [0.2.6] - 2026-10-21
 
 ### Added

@@ -122,7 +122,7 @@ function UiFence({
   if (result.program !== null) lastGood.current = result;
   const shown = lastGood.current;
   const data = useLoadedData({ threadId }, shown?.program ?? null);
-  const loadImage = useImageLoader({ threadId });
+  const loadImage = useImageLoader({ threadId }, stateKey);
   const readText = useTextLoader({ threadId });
   const loadAudio = useAudioLoader({ threadId });
   const loadAsset = useAssetLoader({ threadId });
