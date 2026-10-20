@@ -2,16 +2,15 @@
 // through LiveUi, ```app renders a sandboxed HTML app. Both the BB fence slot
 // and the DOM overlay mount this, so they behave the same.
 import { memo, useCallback, useMemo, useRef } from "react";
-import { useBbNavigate, useComposers, useSdk, type PluginComposerApi } from "@get-bb/plugin-sdk/app";
+import { useBbNavigate, useComposers, useSdk, type ExperimentalLiveFileTarget, type PluginComposerApi } from "@get-bb/plugin-sdk/app";
 import { compileStreaming } from "../core";
+import { fileOpenTarget, THREAD_STORAGE_PREFIX } from "../core/file-target";
 import { AppBlock } from "./AppBlock";
 import { LiveUi, RenderFailure, sendThroughComposer } from "./LiveUi";
 import { useAudioLoader, useImageLoader, useLoadedData, useTextLoader } from "./useLoadedData";
 import { useSuperseded } from "./useSuperseded";
 
 export type FenceLanguage = "ui" | "app";
-
-const THREAD_STORAGE_PREFIX = "$BB_THREAD_STORAGE/";
 
 export interface ThreadActions {
   send(threadId: string, text: string): Promise<void>;
@@ -43,20 +42,25 @@ export function useThreadActions(): ThreadActions {
   const openFile = useCallback(
     async (threadId: string, path: string, line?: number) => {
       const location = line === undefined ? null : ({ kind: "line", line, column: null } as const);
-      // `$BB_THREAD_STORAGE/…` paths name the thread's storage, not its workspace.
-      if (path.startsWith(THREAD_STORAGE_PREFIX)) {
-        return navigate.experimental_openFilePreview({
-          target: { kind: "thread-storage", threadId, path: path.slice(THREAD_STORAGE_PREFIX.length) },
-          location,
-        });
+      const open = (target: ExperimentalLiveFileTarget) => navigate.experimental_openFilePreview({ target, location });
+      // An absolute path is placed by the thread's roots (core/file-target.ts),
+      // the same ones data-source.ts reads Image(path) and Load(path) from; a
+      // `$BB_THREAD_STORAGE/` path needs neither the thread nor its roots.
+      const absolute = path.startsWith("/");
+      const [thread, storage] = await Promise.all([
+        path.startsWith(THREAD_STORAGE_PREFIX) ? null : sdk.threads.get({ threadId, include: "environment" }),
+        absolute ? sdk.threads.storageLocation({ threadId }).catch(() => null) : null,
+      ]);
+      const environment = thread !== null && "environment" in thread ? (thread.environment ?? null) : null;
+      const workspace = typeof environment?.path === "string" ? environment.path : null;
+      const target = fileOpenTarget(path, { storage: storage?.storageRootPath ?? null, workspace });
+      if (target === null) return false;
+      if (target.kind === "thread-storage") return open({ kind: "thread-storage", threadId, path: target.path });
+      if (target.kind === "workspace") {
+        return thread?.environmentId == null ? false : open({ kind: "workspace", environmentId: thread.environmentId, path: target.path });
       }
-      const thread = await sdk.threads.get({ threadId });
-      return thread.environmentId === null
-        ? false
-        : navigate.experimental_openFilePreview({
-            target: { kind: "workspace", environmentId: thread.environmentId, path },
-            location,
-          });
+      const hostId = typeof environment?.hostId === "string" ? environment.hostId : storage?.hostId;
+      return hostId === undefined ? false : open({ kind: "host", hostId, path: target.path });
     },
     [sdk, navigate],
   );
@@ -74,7 +78,7 @@ export const Fence = memo(function Fence({
 }: {
   language: FenceLanguage;
   code: string;
-  /** The closing fence arrived (or, without the BB slot, the text stopped changing). */
+  /** UI input stopped (closed or unclosed); apps arrive here only closed or streaming. The overlay uses text settlement. */
   complete: boolean;
   stateKey: string;
   threadId: string;

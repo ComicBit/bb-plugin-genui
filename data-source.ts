@@ -9,10 +9,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import { parseDataFile, type LoadedData } from "./core";
+import { THREAD_STORAGE_PREFIX } from "./core/file-target";
 
 export const MAX_DATA_BYTES = 2 * 1024 * 1024;
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-const THREAD_STORAGE_PREFIX = "$BB_THREAD_STORAGE/";
 
 /** One way to read a requested file: the root BB confines the read to, and the path in it. */
 interface Attempt {
