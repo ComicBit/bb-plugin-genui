@@ -2,14 +2,7 @@
   "name": "bb-plugin-genui",
   "version": "0.2.0",
   "description": "BB plugin: agents answer with charts, diagrams, maps, plans and forms rendered inline in the chat.",
-  "keywords": [
-    "bb-plugin",
-    "generative-ui",
-    "inline-ui",
-    "charts",
-    "diagrams",
-    "components"
-  ],
+  "keywords": ["bb-plugin", "generative-ui", "inline-ui", "charts", "diagrams", "components"],
   "author": "ComicBit",
   "license": "Apache-2.0",
   "homepage": "https://github.com/ComicBit/bb-plugin-genui#readme",
