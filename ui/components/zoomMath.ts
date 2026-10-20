@@ -38,13 +38,22 @@ export function fitScale(pane: Size, image: Size): number {
   return Math.min(1, pane.width / image.width, pane.height / image.height);
 }
 
-/** Where the image's top-left corner sits in the pane and its scale, for `view`; an image smaller than the pane is centred, a larger one never leaves a gap at an edge. */
+/**
+ * Where the image's top-left corner sits in the pane and its scale, for
+ * `view`. Along an axis where the image is larger than the pane it never
+ * leaves a gap at an edge; where it is smaller it may sit anywhere inside the
+ * pane (centred at `cx`/`cy` = 0.5, as when fitted). A wide diagram zoomed
+ * on a tall phone screen, or a small one zoomed 2× on a large screen, is
+ * still smaller than the pane in one or both axes, and a drag must move it.
+ */
 export function placeImage(view: View, pane: Size, image: Size): Placement {
   const scale = fitScale(pane, image) * view.zoom;
   const along = (paneLength: number, imageLength: number, centre: number) => {
     const shown = imageLength * scale;
-    if (shown <= paneLength) return (paneLength - shown) / 2;
-    return Math.min(0, Math.max(paneLength - shown, paneLength / 2 - centre * shown));
+    const wanted = paneLength / 2 - centre * shown;
+    // Fitted (or zoomed back out to fit), a smaller image is centred again.
+    if (shown <= paneLength) return view.zoom <= 1 ? (paneLength - shown) / 2 : Math.min(paneLength - shown, Math.max(0, wanted));
+    return Math.min(0, Math.max(paneLength - shown, wanted));
   };
   return { scale, x: along(pane.width, image.width, view.cx), y: along(pane.height, image.height, view.cy) };
 }

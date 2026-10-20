@@ -54,6 +54,24 @@ describe("view geometry", () => {
     expect(panBy(zoomed, 10_000, 0, pane, image).cx).toBeCloseTo(0.25, 9);
     expect(clampView({ zoom: Number.NaN, cx: 9, cy: -9 }, pane, image)).toEqual(FIT_VIEW);
   });
+
+  it("lets a zoomed picture that is still smaller than the pane be dragged, inside the pane", () => {
+    // A small diagram in a large full-screen pane: fitted at 1:1, zoomed 2× it still fits.
+    const big = { width: 1300, height: 900 };
+    const small = { width: 600, height: 300 };
+    const zoomed = { zoom: 2, cx: 0.5, cy: 0.5 };
+    expect(placeImage(zoomed, big, small)).toEqual({ scale: 2, x: 50, y: 150 });
+    const moved = panBy(zoomed, -30, 40, big, small);
+    expect(placeImage(moved, big, small)).toEqual({ scale: 2, x: 20, y: 190 });
+    // It stops at the pane's edges.
+    expect(placeImage(panBy(zoomed, 10_000, -10_000, big, small), big, small)).toEqual({ scale: 2, x: 100, y: 0 });
+    // A wide diagram on a tall phone pane: the short axis moves too, and zooming back to fit recentres it.
+    const phone = { width: 390, height: 760 };
+    const wide = { width: 900, height: 300 };
+    const view = panBy({ zoom: 2, cx: 0.5, cy: 0.5 }, 0, -60, phone, wide);
+    expect(placeImage(view, phone, wide).y).toBeCloseTo(380 - 130 - 60, 6);
+    expect(placeImage({ ...view, zoom: 1 }, phone, wide).y).toBeCloseTo((760 - 130) / 2, 6);
+  });
 });
 
 describe("pinchView", () => {
