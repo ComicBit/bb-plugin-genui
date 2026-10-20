@@ -14,7 +14,8 @@
 // - reads the reply's own thread's state from BB (project/source.ts) for
 //   Changes, Commits, PullRequest and Threads, and keeps what Changes and
 //   Commits first showed per reply block; and its project's environments
-//   (project/environments.ts) for Environments.
+//   (project/environments.ts) for Environments,
+// - declares the `animations` setting, which only the page reads.
 import { cliCommand, defineCli, defineRpcContract, PluginCliError, type BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import { LIMITS } from "./core/catalog";
@@ -59,6 +60,17 @@ const UI_ID = /^[a-z0-9]{10}$/;
 
 /** Thread ids kept for the code-work instruction section (see configure). */
 const MAX_PERSON_THREADS = 10_000;
+
+/** Declared here so BB lists it; the page reads it (ui/components/motion.ts). */
+export const MOTION_SETTINGS = {
+  animations: {
+    type: "boolean",
+    label: "Animations",
+    description:
+      "Lets inline UI move: text fades in, rows and cards rise into place, charts draw, sections glide open, maps and carousels scroll smoothly, and 3D scenes and shaders play. Off, nothing moves: everything appears at once, transitions are instant, and 3D scenes and shaders hold a still frame. The system's reduced-motion setting is honoured either way. Sandboxed apps keep their own motion.",
+    default: true,
+  },
+} as const;
 
 const storedUiSchema = z.object({ source: z.string() });
 
@@ -207,6 +219,7 @@ export const rpcContract = defineRpcContract({
 
 export default async function plugin(bb: BbPluginApi) {
   const web = createWebLookups(bb);
+  bb.settings.define(MOTION_SETTINGS);
   /** Image searches for markdown renderings: the photo found, or null (none, or lookups off). */
   const findImage = async (query: string) => {
     const found = await web.search(query);

@@ -9,6 +9,7 @@
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { ACCENT } from "../values";
 import { PALETTE } from "./chartKit";
+import { reducedMotion, useAnimationsOff } from "./motion";
 
 /** GPU components holding a context at once. */
 const MAX_ACTIVE = 6;
@@ -91,22 +92,21 @@ export function keepSnapshot(key: string, canvas: HTMLCanvasElement): void {
   }
 }
 
-/** Live: follows the OS setting without a reload. */
-const REDUCED_MOTION = matchMedia("(prefers-reduced-motion: reduce)");
-
 /**
  * Calls `frame(t, dt)` (seconds since the loop started, seconds since the
  * last frame) every animation frame while `running`; with reduced motion,
- * once per start. The latest `frame` is always the one called.
+ * once per start. Turning the Animations setting off or on restarts it. The
+ * latest `frame` is always the one called.
  */
 export function useFrameLoop(running: boolean, frame: (t: number, dt: number) => void): void {
   const latest = useRef(frame);
   latest.current = frame;
+  const animationsOff = useAnimationsOff();
   useEffect(() => {
     if (!running) return;
     const start = performance.now();
     let last = start;
-    if (REDUCED_MOTION.matches) {
+    if (reducedMotion()) {
       latest.current(0, 0);
       return;
     }
@@ -116,7 +116,7 @@ export function useFrameLoop(running: boolean, frame: (t: number, dt: number) =>
       handle = requestAnimationFrame(tick);
     });
     return () => cancelAnimationFrame(handle);
-  }, [running]);
+  }, [running, animationsOff]);
 }
 
 /**

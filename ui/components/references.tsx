@@ -33,7 +33,7 @@ import { KeyValue } from "./content";
 import { keyValuePairs } from "./content-model";
 import { ErrorLine } from "./display";
 import { CAPTION, FOCUS_RING } from "./inputs";
-import { FADE, RISE, SMOOTH_HEIGHT_CLASS, useEntrance, useSmoothHeight } from "./motion";
+import { FADE, reducedMotion, RISE, SMOOTH_HEIGHT_CLASS, useEntrance, useSmoothHeight } from "./motion";
 import {
   domainOf,
   entityKind,
@@ -499,8 +499,6 @@ const HOTSPOT_MAX_HEIGHT_REM = 28;
 /** Half a pin's 32 px touch target: pin centers stay this far inside the image's edges. */
 const PIN_INSET = "1rem";
 
-const REDUCED_MOTION = matchMedia("(prefers-reduced-motion: reduce)");
-
 function Pin({
   point,
   selected,
@@ -577,7 +575,7 @@ export function Hotspots({ props }: { props: Props }) {
     if (scrollTo === null) return;
     rows.current.get(scrollTo.number)?.scrollIntoView({
       block: "nearest",
-      behavior: REDUCED_MOTION.matches ? "auto" : "smooth",
+      behavior: reducedMotion() ? "auto" : "smooth",
     });
   }, [scrollTo]);
 

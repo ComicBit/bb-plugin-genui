@@ -15,6 +15,7 @@ import { GalleryHeader, groupAnchor, type GallerySelection } from "./GalleryHead
 import { componentsIn, GALLERY_GROUPS } from "./gallery-search";
 import { LiveUi, RenderFailure } from "./LiveUi";
 import { useAssetLoader, useAudioLoader, useImageLoader, useLoadedData, useTextLoader } from "./useLoadedData";
+import { useMotionScope } from "./components/motion";
 
 const PANEL = "gallery";
 
@@ -52,6 +53,7 @@ export function GalleryPanel({ subPath }: { subPath: string }) {
   const [listing, setListing] = useState<Listing>({ status: "loading" });
   const [generation, setGeneration] = useState(0);
   const scroller = useRef<HTMLDivElement>(null);
+  const motion = useMotionScope();
 
   useEffect(() => {
     let live = true;
@@ -122,7 +124,7 @@ export function GalleryPanel({ subPath }: { subPath: string }) {
 
   return (
     // BB's page frame doesn't scroll; the page is its own scroll container.
-    <div ref={scroller} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+    <div {...motion} ref={scroller} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <div className="mx-auto flex w-full max-w-3xl flex-col px-5 pb-12">
         <GalleryHeader
           selection={selection}

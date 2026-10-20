@@ -3,8 +3,12 @@
 // heights glide. Every entrance plays once, when its element first mounts:
 // nodes keep their React keys across re-evaluations, so state changes never
 // replay it. Web Animations, not CSS classes, so no stylesheet is needed and
-// nothing is left applied after the animation ends.
+// nothing is left applied after the animation ends. All of it holds still
+// when the system asks for reduced motion or the plugin's Animations setting
+// is off (reducedMotion, useMotionScope).
 import { createContext, useContext, useLayoutEffect, useRef, type RefObject } from "react";
+import { useSettings } from "@get-bb/plugin-sdk/app";
+import type { MOTION_SETTINGS } from "../../server";
 
 /** Exponential ease-out: fast start, long soft landing. */
 export const EASE_OUT_EXPO = "cubic-bezier(0.16, 1, 0.3, 1)";
@@ -45,7 +49,69 @@ function staggerDelay(): number {
 }
 
 /** Live: follows the OS setting without a reload. */
-const REDUCED_MOTION = matchMedia("(prefers-reduced-motion: reduce)");
+const SYSTEM_REDUCED_MOTION = matchMedia("(prefers-reduced-motion: reduce)");
+
+const ANIMATIONS: keyof typeof MOTION_SETTINGS = "animations";
+/**
+ * The Animations setting turned off, as a block last read it. Kept in
+ * localStorage too: BB answers useSettings after the first blocks of a fresh
+ * page have mounted, and they would play the entrances the user turned off.
+ */
+const ANIMATIONS_OFF_STORAGE = "bb.genui.animationsOff";
+let animationsOff = readAnimationsOff();
+
+function readAnimationsOff(): boolean {
+  try {
+    return localStorage.getItem(ANIMATIONS_OFF_STORAGE) !== null;
+  } catch {
+    return false;
+  }
+}
+
+function rememberAnimationsOff(off: boolean): void {
+  if (off === animationsOff) return;
+  animationsOff = off;
+  try {
+    if (off) localStorage.setItem(ANIMATIONS_OFF_STORAGE, "1");
+    else localStorage.removeItem(ANIMATIONS_OFF_STORAGE);
+  } catch {
+    // Storage unavailable: a fresh page moves until BB answers.
+  }
+}
+
+/**
+ * Whether to hold still: the system asks for reduced motion, or the plugin's
+ * Animations setting is off. Read at the moment of moving, so both apply
+ * without a reload.
+ */
+export function reducedMotion(): boolean {
+  return animationsOff || SYSTEM_REDUCED_MOTION.matches;
+}
+
+/**
+ * The Animations setting turned off; the caller re-renders when it changes,
+ * for motion that is already running (a 3D frame loop).
+ */
+export function useAnimationsOff(): boolean {
+  const { values } = useSettings();
+  // During render, before what mounts with the caller runs its entrances.
+  if (values !== undefined) rememberAnimationsOff(values[ANIMATIONS] === false);
+  return animationsOff;
+}
+
+const STILL = { "data-genui-motion": "off" } as const;
+const MOVING = {} as const;
+
+/**
+ * The attributes for the outer element of what the plugin mounts (a block's
+ * frame, a placeholder, a portal). With the Animations setting off that is
+ * `data-genui-motion="off"`, under which app.css stops every CSS transition
+ * and animation; the Web Animations here and the smooth scrolls elsewhere
+ * check reducedMotion().
+ */
+export function useMotionScope(): { readonly "data-genui-motion"?: "off" } {
+  return useAnimationsOff() ? STILL : MOVING;
+}
 
 /** Zeron's streaming fade (crates/veil): seed for the gap between appends, and its clamps. */
 const STREAM_GAP_SEED_MS = 160;
@@ -106,7 +172,7 @@ export function useEntrance<T extends Element>(entrance: Entrance): RefObject<T 
   const { quietUntil, stream } = useContext(EntranceContext);
   useLayoutEffect(() => {
     const element = ref.current;
-    if (element === null || REDUCED_MOTION.matches || performance.now() < quietUntil) return;
+    if (element === null || reducedMotion() || performance.now() < quietUntil) return;
     const streamed = stream.fadeMs;
     const animation =
       streamed === null
@@ -161,7 +227,7 @@ export function useSmoothHeight<O extends HTMLElement, I extends HTMLElement>():
       const next = content.offsetHeight;
       const delta = next - last;
       last = next;
-      if (delta === 0 || REDUCED_MOTION.matches || performance.now() - lastInput > INPUT_WINDOW_MS) {
+      if (delta === 0 || reducedMotion() || performance.now() - lastInput > INPUT_WINDOW_MS) {
         animation?.cancel();
         animation = null;
         return;

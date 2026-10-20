@@ -28,7 +28,7 @@ import {
   type Size,
   type View,
 } from "./mapMath";
-import { RISE, useEntrance } from "./motion";
+import { reducedMotion, RISE, useEntrance } from "./motion";
 import { NO_BB_SWIPE } from "./viewer";
 
 interface Place {
@@ -111,8 +111,6 @@ function useLookups(places: readonly (Place | null)[]): ReadonlyMap<string, Plac
 
   return found;
 }
-
-const REDUCED_MOTION = matchMedia("(prefers-reduced-motion: reduce)");
 
 /** One map tile: fetched when drawn, faded in once decoded. */
 function MapTile({ z, x, y, left, top, size, onOff }: { z: number; x: number; y: number; left: number; top: number; size: number; onOff: () => void }) {
@@ -252,7 +250,7 @@ export function MapView({ props }: { props: Props }) {
   const animateTo = useCallback(
     (target: View) => {
       stopAnimation();
-      if (view === null || REDUCED_MOTION.matches) {
+      if (view === null || reducedMotion()) {
         setView(target);
         return;
       }
@@ -476,7 +474,7 @@ export function MapView({ props }: { props: Props }) {
                   aria-pressed={selected === index}
                   onClick={() => {
                     setSelected(index);
-                    listRef.current?.querySelector(`[data-place="${index}"]`)?.scrollIntoView({ block: "nearest", behavior: REDUCED_MOTION.matches ? "auto" : "smooth" });
+                    listRef.current?.querySelector(`[data-place="${index}"]`)?.scrollIntoView({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
                   }}
                   onPointerEnter={() => setHovered(index)}
                   onPointerLeave={() => setHovered(null)}

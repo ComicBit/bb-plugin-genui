@@ -99,9 +99,17 @@ The internals behind [the README](../README.md): how agents learn the language, 
    streams only fades, never moves, for three times the average gap between
    appends (120–400 ms, after Zeron's `veil`); the rise and stagger are for
    blocks that open complete and for what the user's input reveals
-   (`ui/components/motion.ts`). On the slot path, ```app blocks run
-   only after the closing delimiter; the overlay uses the settlement
-   heuristic above. Apps run in an `<iframe sandbox="allow-scripts">`
+   (`ui/components/motion.ts`). Entrances, height glides, smooth scrolls
+   and 3D hold still when the system asks for reduced motion or the
+   `animations` setting is off (`reducedMotion()`; a Scene or Shader draws
+   one frame). With the setting off, each block, placeholder and portal also
+   carries `data-genui-motion="off"`, under which `app.css` stops every CSS
+   transition and animation; the system setting reaches CSS only through
+   `motion-reduce:` variants. The page reads the setting with `useSettings`,
+   live, and keeps it in `localStorage`, since BB answers after a fresh
+   page's first blocks have mounted. On the slot path,
+   ```app blocks run only after the closing delimiter; the overlay uses the
+   settlement heuristic above. Apps run in an `<iframe sandbox="allow-scripts">`
    with an opaque origin, a no-network CSP and BB's theme variables, and
    size themselves to their content. BB's streaming-tail move preserves
    iframe documents where `Element.moveBefore` exists; elsewhere an iframe

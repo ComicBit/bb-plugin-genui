@@ -18,7 +18,7 @@ import {
 import { RenderNodes } from "./render";
 import { useReservedHeight } from "./reservedHeight";
 import { UiRuntimeContext, type UiRuntime } from "./runtime";
-import { EntranceContext, newStreamCadence, trackStream } from "./components/motion";
+import { EntranceContext, newStreamCadence, trackStream, useMotionScope } from "./components/motion";
 
 /** Blocks mounted in this page, so a remount (BB's timeline while scrolling) doesn't replay entrances. */
 const MOUNTED = new Set<string>();
@@ -267,15 +267,17 @@ export function Frame({
   gallery?: GalleryExample;
   children: ReactNode;
 }) {
+  const motion = useMotionScope();
   // data-bb-image-preview-ignore: the components size and open their own
   // images; an image-preview plugin restyling every <img> would break them.
   return gallery === undefined ? (
-    <div data-bb-image-preview-ignore="" className="group/genui not-prose my-3 flex flex-col gap-3">
+    <div {...motion} data-bb-image-preview-ignore="" className="group/genui not-prose my-3 flex flex-col gap-3">
       {children}
       <ReplySource source={source} language={language} files={files} diagnostics={diagnostics} />
     </div>
   ) : (
     <div
+      {...motion}
       data-bb-image-preview-ignore=""
       role="group"
       aria-label={exampleTitle(gallery)}
