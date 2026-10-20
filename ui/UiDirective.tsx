@@ -8,6 +8,7 @@ import type { rpcContract } from "../server";
 import { LiveUi, RenderFailure, sendThroughComposer } from "./LiveUi";
 import { useAssetLoader, useAudioLoader, useImageLoader, useLoadedData, useTextLoader } from "./useLoadedData";
 import { useSuperseded } from "./useSuperseded";
+import { useMotionScope } from "./components/motion";
 
 const UI_ID = /^[a-z0-9]{10}$/;
 
@@ -77,11 +78,13 @@ function StoredUi({
   const loadAudio = useAudioLoader({ threadId });
   const loadAsset = useAssetLoader({ threadId });
   const superseded = useSuperseded(threadId, messageId);
+  const motion = useMotionScope();
 
   switch (load.status) {
     case "loading":
       return (
         <div
+          {...motion}
           role="status"
           aria-label="Loading UI"
           className="not-prose my-3 h-28 animate-pulse rounded-lg border border-border bg-surface-recessed"

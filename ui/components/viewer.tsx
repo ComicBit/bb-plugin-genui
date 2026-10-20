@@ -28,7 +28,7 @@ import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import type { Size } from "../../core/compare";
 import { useUiRuntime } from "../runtime";
-import { EASE_OUT_EXPO } from "./motion";
+import { EASE_OUT_EXPO, reducedMotion, useMotionScope } from "./motion";
 import {
   clampView,
   FIT_VIEW,
@@ -480,6 +480,7 @@ export function FullScreen({
   children: ReactNode;
 }) {
   const pluginId = experimental_usePluginId();
+  const motion = useMotionScope();
   const dialog = useRef<HTMLDivElement>(null);
   const close = useRef<HTMLButtonElement>(null);
 
@@ -488,7 +489,7 @@ export function FullScreen({
     const root = document.documentElement;
     const overflow = root.style.overflow;
     root.style.overflow = "hidden";
-    if (!matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    if (!reducedMotion()) {
       dialog.current?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 180, easing: EASE_OUT_EXPO });
     }
     // A dialog the viewer was opened from hands focus back to its trigger as it closes; keep it here.
@@ -527,6 +528,7 @@ export function FullScreen({
     // React bubbles a portal's events through the component that opened it: a
     // click or key in here must not toggle a row, close a panel or pick a pin there.
     <div
+      {...motion}
       data-bb-plugin={pluginId}
       data-bb-plugin-root=""
       data-bb-portaled-overlay=""

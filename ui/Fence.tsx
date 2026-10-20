@@ -9,6 +9,7 @@ import { AppBlock } from "./AppBlock";
 import { LiveUi, RenderFailure, sendThroughComposer } from "./LiveUi";
 import { useAssetLoader, useAudioLoader, useImageLoader, useLoadedData, useTextLoader } from "./useLoadedData";
 import { useSuperseded } from "./useSuperseded";
+import { useMotionScope } from "./components/motion";
 
 export type FenceLanguage = "ui" | "app";
 
@@ -128,12 +129,14 @@ function UiFence({
   const send = useCallback((text: string) => actions.send(threadId, text), [actions, threadId]);
   const openFile = useCallback((path: string, line?: number) => actions.openFile(threadId, path, line), [actions, threadId]);
   const superseded = useSuperseded(threadId, messageId);
+  const motion = useMotionScope();
 
   if (shown?.program == null) {
     return complete ? (
       <RenderFailure source={code} diagnostics={result.diagnostics} />
     ) : (
       <div
+        {...motion}
         role="status"
         aria-label="Building UI"
         className="not-prose my-3 h-20 animate-pulse rounded-xl border border-border bg-surface-recessed"

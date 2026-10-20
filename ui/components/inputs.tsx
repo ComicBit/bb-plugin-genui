@@ -19,7 +19,7 @@ import {
 import { CheckMark, ErrorLine } from "./display";
 // fields.tsx imports this module's field styles; Radio is only used at render time, so the cycle is safe.
 import { Radio } from "./fields";
-import { useEntrance, type Entrance } from "./motion";
+import { reducedMotion, useEntrance, type Entrance } from "./motion";
 
 export const FOCUS_RING =
   "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
@@ -419,8 +419,7 @@ export function useClosedChoices(): { closed: boolean; gone: boolean } {
       setGone(false);
       return;
     }
-    const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const timer = setTimeout(() => setGone(true), reduced ? 0 : CHOICE_FADE_MS);
+    const timer = setTimeout(() => setGone(true), reducedMotion() ? 0 : CHOICE_FADE_MS);
     return () => clearTimeout(timer);
   }, [closed]);
   return { closed, gone };

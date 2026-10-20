@@ -22,7 +22,7 @@ import { cardOptions, followUpPrompts, sameColor, swatchColors, togglePick, type
 import { CheckMark, ErrorLine } from "./display";
 import { CAPTION, SentLine, useClosedChoices } from "./inputs";
 import { useImageUrl, type ImageState } from "./media";
-import { RISE, useEntrance } from "./motion";
+import { reducedMotion, RISE, useEntrance } from "./motion";
 import { ExpandButton, useGroupPicture, ViewerGroup } from "./viewer";
 
 /** Selectable tiles get an offset ring, so focus never reads as selection. */
@@ -446,8 +446,6 @@ const SLIDE_GAP_PX = 12;
 /** How far the hidden side of the row fades out. */
 const EDGE_FADE = "1.75rem";
 
-const REDUCED_MOTION = matchMedia("(prefers-reduced-motion: reduce)");
-
 /**
  * A horizontal scroll-snap row of cards (each Card a tile), the next card
  * peeking. Swipe or trackpad on touch; arrow buttons where a pointer can
@@ -498,7 +496,7 @@ export function Carousel({ props }: { props: Props }) {
     const element = scroller.current;
     const slide = track.current?.firstElementChild;
     if (element === null || !(slide instanceof HTMLElement)) return;
-    const behavior: ScrollBehavior = REDUCED_MOTION.matches ? "auto" : "smooth";
+    const behavior: ScrollBehavior = reducedMotion() ? "auto" : "smooth";
     if (!Number.isFinite(direction)) {
       element.scrollTo({ left: direction > 0 ? element.scrollWidth : 0, behavior });
       return;

@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { callSignature, COMPONENTS, type CatalogComponentSpec, type ComponentGroup, type ComponentName } from "../core/catalog";
 import { variantName } from "./FrameFooter";
 import { componentsIn, GALLERY_GROUPS, GALLERY_ORDER, searchComponents, type ComponentMatch } from "./gallery-search";
+import { reducedMotion } from "./components/motion";
 
 /** What the page shows, as the header names it. */
 export type GallerySelection =
@@ -423,8 +424,7 @@ function ChipRow({ label, chips, activeKey }: { label: string | null; chips: rea
     const right = left + chip.offsetWidth;
     const inView = left >= strip.scrollLeft + 24 && right <= strip.scrollLeft + strip.clientWidth - 24;
     if (!inView) {
-      const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      strip.scrollTo({ left: left - (strip.clientWidth - chip.offsetWidth) / 2, behavior: placed.current && !reduce ? "smooth" : "auto" });
+      strip.scrollTo({ left: left - (strip.clientWidth - chip.offsetWidth) / 2, behavior: placed.current && !reducedMotion() ? "smooth" : "auto" });
     }
     placed.current = true;
   }, [activeKey]);

@@ -35,6 +35,7 @@ import { propsKey, usePersistedState } from "../usePersistedState";
 import { ACCENT, optionalText, type Props } from "../values";
 import { ErrorLine } from "./display";
 import { FIELD, FOCUS_RING } from "./inputs";
+import { reducedMotion } from "./motion";
 import { Frame, Heading, Quiet, Segmented } from "./perfKit";
 import { ICON_BUTTON } from "./projectKit";
 
@@ -78,8 +79,6 @@ const COLUMN_PAGE = 400;
 const USER_SCROLL_HOLD_MS = 3000;
 /** Leading space before the first second, so the first word isn't flush with the edge. */
 const LANE_PAD_PX = 12;
-
-const REDUCED_MOTION = matchMedia("(prefers-reduced-motion: reduce)");
 
 type ErrorKind = "sub" | "del" | "ins" | "speaker";
 
@@ -787,7 +786,7 @@ function Timeline({
       const target = Math.max(0, time * pps + LANE_PAD_PX - element.clientWidth * 0.25);
       // A glide across more than two screens only blurs past words; jump there instead.
       const near = Math.abs(target - element.scrollLeft) < element.clientWidth * 2;
-      element.scrollTo({ left: target, behavior: smooth && near && !REDUCED_MOTION.matches ? "smooth" : "auto" });
+      element.scrollTo({ left: target, behavior: smooth && near && !reducedMotion() ? "smooth" : "auto" });
     },
     [pps],
   );
@@ -1258,7 +1257,7 @@ function AlignedText({
       return;
     }
     handled.current = reveal.nonce;
-    container.current?.querySelector(`[data-column="${firstChosen}"]`)?.scrollIntoView({ block: "nearest", behavior: REDUCED_MOTION.matches ? "auto" : "smooth" });
+    container.current?.querySelector(`[data-column="${firstChosen}"]`)?.scrollIntoView({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reveal, page]);
 
