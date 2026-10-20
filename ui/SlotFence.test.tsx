@@ -4,8 +4,8 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import type * as PluginSdkApp from "@get-bb/plugin-sdk/app";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ExperimentalCodeFenceRendererProps } from "@get-bb/plugin-sdk/app";
 import { SlotFence } from "./SlotFence";
-import type { CodeFenceRendererProps } from "./SlotFence";
 
 // Only BB's runtime is replaced; compilation, Fence, AppBlock and diagnostics are real.
 vi.mock("@get-bb/plugin-sdk/app", async (importOriginal) => ({
@@ -24,7 +24,7 @@ const message = { id: "orbit:assistant:1", threadId: "orbit", turnId: "turn", pr
 const html = '<button onclick="this.textContent=\'Started\'">Start Orbit</button>';
 const original = () => <pre>{html}</pre>;
 
-function render(language: "ui" | "app", status: CodeFenceRendererProps["status"], code: string): void {
+function render(language: "ui" | "app", status: ExperimentalCodeFenceRendererProps["status"], code: string): void {
   act(() => root.render(<SlotFence language={language} status={status} code={code} index={0} message={message} Original={original} />));
 }
 

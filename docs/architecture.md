@@ -52,8 +52,8 @@ The internals behind [the README](../README.md): how agents learn the language, 
      BB keeps the renderer instance through streaming, closure and reply
      completion. Missing, disabled, conflicting or crashing renderers fall
      back to BB's code block; a crash is retried when code or status changes.
-     The local contract mirrors SDK 0.6.40 until npm publishes a version
-     declaring it; then the SDK types replace the mirror and registration cast.
+     The props are the SDK's `ExperimentalCodeFenceRendererProps` (0.6.54);
+     `app.tsx` checks the method exists at runtime, since BB 0.45 lacks it.
    - On a BB without that slot, an app overlay (`ui/FenceOverlay.tsx`) finds
      the code blocks in BB's DOM, hides them and portals the same `Fence`
      there. It treats a block as complete after 1.5 seconds without a text
