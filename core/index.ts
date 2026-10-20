@@ -19,6 +19,7 @@ export {
   toMarkdownWithImages,
   type SearchedImage,
 } from "./markdown";
+export { MAX_PROBES, probeInteractions, type ProbeReport } from "./probe";
 export { compileStreaming } from "./streaming";
 
 /** Parses and validates a spec. `program` is null iff there is at least one error. */

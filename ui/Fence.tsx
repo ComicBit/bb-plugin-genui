@@ -154,6 +154,7 @@ function UiFence({
       superseded={superseded}
       threadId={threadId}
       blockKey={stateKey}
+      streaming={!complete}
     />
   );
 }

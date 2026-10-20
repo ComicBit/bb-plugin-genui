@@ -13,6 +13,7 @@ import {
   formatDiagnostics,
   imageSearches,
   initialState,
+  probeInteractions,
   specToMarkdown,
   type DataRequest,
   type LoadedData,
@@ -111,7 +112,8 @@ export async function renderReplyMarkdown(text: string, load: Loader, find?: Ima
 
 /**
  * What the check_ui tool tells the agent about one ```ui block: why it fails
- * to compile, which files Load and Snippet can't read, evaluation errors, and
+ * to compile, which files Load and Snippet can't read, evaluation errors, the
+ * errors its inputs cause once used (each slider end, toggle, option...), and
  * otherwise the text version of what the user will see.
  */
 export async function checkSpec(
@@ -127,13 +129,18 @@ export async function checkSpec(
   const requests = collectLoads(compiled.program);
   const loaded = await Promise.all(requests.map(async (request) => [request, await load(request)] as const));
   const data = new Map(loaded.map(([request, result]) => [dataKey(request), result] as const));
-  const { roots, diagnostics } = evaluate(compiled.program, initialState(compiled.program, data), data);
+  const state = initialState(compiled.program, data);
+  const initial = evaluate(compiled.program, state, data);
+  const { roots, diagnostics } = initial;
+  const probed = probeInteractions(compiled.program, state, initial, data);
   const problems = [
     ...loaded.flatMap(([request, result]) => (result.ok ? [] : [`${request.path}: ${result.error}`])),
     ...(diagnostics.length > 0 ? [formatDiagnostics(diagnostics)] : []),
+    ...probed.failures.map(({ probe, diagnostics }) => `After ${probe.describe}:\n${formatDiagnostics(diagnostics)}`),
   ];
+  const tried = probed.tried === 0 ? "" : ` Tried ${probed.tried} interaction${probed.tried === 1 ? "" : "s"}.`;
   const preview = `Text version of what the user will see:\n\n${await rootsMarkdown(roots, find, project)}`;
   return problems.length === 0
-    ? { ok: true, report: `No errors. ${preview}` }
+    ? { ok: true, report: `No errors.${tried} ${preview}` }
     : { ok: false, report: `Fix before replying:\n${problems.join("\n")}\n\n${preview}` };
 }

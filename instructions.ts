@@ -38,7 +38,7 @@ ${componentLines(REFERENCE_GROUPS)}
 Actions: ${actionList}; a list runs in order; Send posts as the user.
 Data: Load("path") reads JSON/CSV/TSV/JSONL from the workspace, "$BB_THREAD_STORAGE/x.json" or /tmp into lists and objects, and other files (a log, tsc output) as text; never retype values a file or command output holds. Snippet and Image read files the same way.
 Games, simulations, custom visuals: write \`\`\`app, a self-contained HTML page (inline CSS/JS, CSS vars --foreground --muted-foreground --border --primary --card; sandboxed, no network).
-The check_ui tool (optional, before you reply) checks a block that uses Snippet or Load (wrong line ranges, unreadable files) and shows its text version.`;
+The check_ui tool (optional, before you reply) checks a block that uses Snippet, Load or inputs: unreadable files, wrong line ranges, errors a slider end, toggle or option causes once used; it shows the text version.`;
 
 export const UI_REFERENCE_MORE = `# Inline UI reference, continued
 ${componentLines(REFERENCE_MORE_GROUPS)}

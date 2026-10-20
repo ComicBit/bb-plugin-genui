@@ -207,7 +207,7 @@ export default async function plugin(bb: BbPluginApi) {
   bb.agents.registerTool({
     name: "check_ui",
     description:
-      "Checks a ```ui block before you put it in your reply: compile errors, files Load or Snippet can't read, wrong line ranges, and the text version of what the user will see. Optional; use it for blocks with Load or Snippet.",
+      "Checks a ```ui block before you put it in your reply: compile errors, files Load or Snippet can't read, wrong line ranges, errors its inputs cause once used (each slider end, toggle, option, emptied list), and the text version of what the user will see. Optional; use it for blocks with Load, Snippet or inputs.",
     instructions: UI_REFERENCE,
     parameters: z.object({
       spec: z.string().min(1).max(LIMITS.sourceChars).describe("The block's content, without the ``` fence lines"),

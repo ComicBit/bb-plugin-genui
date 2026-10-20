@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DataRequest, LoadedData } from "./core";
-import { renderReplyMarkdown } from "./fallback";
+import { checkSpec, renderReplyMarkdown } from "./fallback";
 
 const reply = [
   "Pro costs **$290** a month for 10 seats.",
@@ -62,5 +62,31 @@ describe("renderReplyMarkdown", () => {
   it("returns text without ui or app fences unchanged", async () => {
     const text = "Plain answer.\n\n```js\nx()\n```";
     expect(await renderReplyMarkdown(text, async () => ({ ok: false, error: "" }))).toBe(text);
+  });
+});
+
+describe("checkSpec", () => {
+  const noFiles = async (): Promise<LoadedData> => ({ ok: false, error: "unused" });
+
+  it("reports what breaks once an input is used, though the initial render is clean", async () => {
+    const spec = ['$n = 4', '$plan = "Pro"', "prices = {Basic: 12, Pro: 29}", 'Card("Split", [', '  Slider($n, 0, 10), Choice($plan, ["Basic", "Pro", "Team"]),', '  Metric("Each", fmt(100 / $n, 2)), Metric("Total", fmt(prices[$plan] * 10))', "])"].join("\n");
+    const { ok, report } = await checkSpec(spec, noFiles);
+    expect(ok).toBe(false);
+    expect(report).toContain("After setting $n to 0:\n6:26 error: fmt() needs a number, got null");
+    expect(report).toContain('After picking "Team" for $plan:\n6:63 error: `*` needs a number, got null');
+    expect(report).not.toContain("setting $n to 10");
+    expect(report).not.toContain('"Basic"');
+  });
+
+  it("reports an error the initial render already has once, not again for every interaction", async () => {
+    const { report } = await checkSpec('$on = false\nCard("x", [Toggle($on, "On"), Text(fmt("a"))])', noFiles);
+    expect(report.split("Text version")[0].match(/fmt\(\) needs a number/g)).toHaveLength(1);
+    expect(report).not.toContain("After ");
+  });
+
+  it("passes a block whose inputs all work and says how many it tried", async () => {
+    const { ok, report } = await checkSpec('$seats = 10\nCard("x", [Slider($seats, 1, 50), Metric("Total", fmt(29 * $seats))])', noFiles);
+    expect(ok).toBe(true);
+    expect(report).toMatch(/^No errors\. Tried 2 interactions\./);
   });
 });

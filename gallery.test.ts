@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { collectLoads, compile, dataKey, evaluate, formatDiagnostics, initialState, type LoadedData } from "./core";
+import { collectLoads, compile, dataKey, evaluate, formatDiagnostics, initialState, probeInteractions, type LoadedData } from "./core";
 import type { UiNode } from "./core/types";
 import { COMPONENTS } from "./core/catalog";
 import { listGallery, loadGalleryFile, readGallerySpec } from "./data-source";
@@ -43,9 +43,13 @@ describe("gallery", () => {
         expect(loaded, `${name}: ${request.path}`).toMatchObject({ ok: true });
         data.set(dataKey(request), loaded);
       }
-      const { roots, diagnostics } = evaluate(program, initialState(program, data), data);
-      expect(diagnostics.map((d) => d.message), name).toEqual([]);
-      expect(errorNodes(roots), name).toEqual([]);
+      const state = initialState(program, data);
+      const initial = evaluate(program, state, data);
+      expect(initial.diagnostics.map((d) => d.message), name).toEqual([]);
+      expect(errorNodes(initial.roots), name).toEqual([]);
+      // The examples are what agents copy: their inputs must work at every end too.
+      const { failures } = probeInteractions(program, state, initial, data);
+      expect(failures.map(({ probe, diagnostics }) => `after ${probe.describe}: ${formatDiagnostics(diagnostics)}`), name).toEqual([]);
     }
   });
 });

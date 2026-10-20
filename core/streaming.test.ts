@@ -59,19 +59,33 @@ describe("compileStreaming", () => {
     expect(card.props).toEqual({ title: "T", children: [] });
   });
 
-  it("never renders a string or template cut mid-way", () => {
-    for (const source of [
-      `Card("T", [Text("hello wor`,
-      "Card(\"T\", [Text(`hello ${1 + ",
-      "Card(\"T\", [Text(`hello ${[1, 2].join(\", \")} wor",
-      `Card("T", [Text('it\\'s a [b`,
-      `Card("T", [Text("a"), // a comment with [ and (`,
-    ]) {
+  it("never renders a template or a reference string cut mid-way", () => {
+    for (const [source, shown] of [
+      ["Card(\"T\", [Text(`hello ${1 + ", []],
+      ["Card(\"T\", [Text(`hello ${[1, 2].join(\", \")} wor", []],
+      [`Card("T", [Text("a"), // a comment with [ and (`, [{ text: "a" }]],
+      [`Card("T", [Image("shots/hom`, []],
+      [`Card("T", [Map([{name: "Belém To`, [{ places: [{}] }]],
+      [`Card("T", [List([{title: "a", icon: "Pl`, [{ items: [{ title: "a" }] }]],
+      [`Card("T", [Callout("b", tone: "wa`, [{ text: "b" }]],
+      [`Card("T", [Text("a"), Text("line one\nline two`, [{ text: "a" }]],
+    ] as const) {
       const [card] = render(source) ?? [];
       expect(card.type, source).toBe("Card");
-      const texts = (card.props.children as UiNode[]).map((node) => node.props.text);
-      expect(texts.every((text) => text === "a"), source).toBe(true);
+      expect((card.props.children as UiNode[]).map((node) => node.props), source).toEqual(shown);
     }
+  });
+
+  it("grows prose as it streams, closing the string and any open ** or code span", () => {
+    const text = (source: string) => ((render(source)?.[0].props.children as UiNode[])[0]?.props as Record<string, Value>);
+    expect(text(`Card("T", [Text("hello wor`).text).toBe("hello wor");
+    expect(text(`Card("T", [Text('it\\'s a [b`).text).toBe("it's a [b");
+    expect(text(`Card("T", [Text("ends in \\`).text).toBe("ends in ");
+    expect(text(`Card("T", [Text("the **retry lo`).text).toBe("the **retry lo**");
+    expect(text(`Card("T", [Text("the **retry loop*`).text).toBe("the **retry loop**");
+    expect(text(`Card("T", [Text("call \`requ`).text).toBe("call `requ`");
+    expect(text(`Card("T", [Text("the **`).text).toBe("the **");
+    expect(text(`Card("T", [Steps([{title: "Rate limit", detail: "5 tries a mi`).items).toEqual([{ title: "Rate limit", detail: "5 tries a mi" }]);
   });
 
   it("does not count brackets inside strings", () => {

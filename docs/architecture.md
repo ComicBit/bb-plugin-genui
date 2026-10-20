@@ -39,7 +39,14 @@ The internals behind [the README](../README.md): how agents learn the language, 
      components can't express.
    - `check_ui` is optional: it compiles a block with its files loaded and
      returns the errors (wrong Snippet ranges, unreadable files) and the
-     text version of what the user will see.
+     text version of what the user will see. It also tries the block's
+     inputs the way a reader would (`core/probe.ts`, at most 24 per
+     block, each from the initial state): sliders and steppers at both
+     ends, toggles flipped, every option picked, lists emptied and
+     filled, text cleared, Set buttons pressed. An error one of them adds
+     is reported as `After setting $n to 0: …`, so a block that only
+     breaks on the first drag is fixed before the reader sees it.
+     `gallery.test.ts` runs the same probes over every example.
    - `ui_examples` is optional: it returns the gallery examples of the
      components named (`examples.ts`), with their data files.
 3. Rendering depends on the BB version:
@@ -80,7 +87,19 @@ The internals behind [the README](../README.md): how agents learn the language, 
      `data-genui-hidden`. Persistent keys remain
      `bb.genui.state:${message.id}#${language}#${index}` on either path.
 4. ```ui specs render while the reply streams: `compileStreaming` renders
-   the longest prefix that compiles. On the slot path, ```app blocks run
+   the longest prefix that compiles, cutting after each finished string
+   too, so `Metric("Total", "$"` shows while `+ price` is still coming. A
+   string still being written on the last line is closed where it stops
+   when it is prose (Text, Callout, Card titles, table cells, step details),
+   so a paragraph grows instead of appearing whole at its closing quote, and
+   an open `**` or code span in it is closed too, so the run is styled from
+   its first word instead of flipping when the closer arrives (after Zeron's
+   `mend`). Paths, place names, image queries, icons, tones and labels a
+   tap would send wait for their closing quote. What mounts while a block
+   streams only fades, never moves, for three times the average gap between
+   appends (120–400 ms, after Zeron's `veil`); the rise and stagger are for
+   blocks that open complete and for what the user's input reveals
+   (`ui/components/motion.ts`). On the slot path, ```app blocks run
    only after the closing delimiter; the overlay uses the settlement
    heuristic above. Apps run in an `<iframe sandbox="allow-scripts">`
    with an opaque origin, a no-network CSP and BB's theme variables, and
@@ -107,7 +126,10 @@ The internals behind [the README](../README.md): how agents learn the language, 
    language also takes what models write anyway: named functions
    (`paid = p => sum($rows.filter(r => r.by == p).map(r => r.amount))`,
    called as `paid("Ana")`; no recursion, keys per call site) and object
-   keys written as bare words (`{Good for: "views"}`).
+   keys written as bare words (`{Good for: "views"}`). A style argument
+   (`color:`, `background:`, `size:`…) is an error that says why:
+   components draw in BB's theme, and `tone:` is the status colour where a
+   component has one.
 8. Data by reference: `Load("path")` reads a JSON (also `.sarif`, `.har`),
    CSV, TSV, JSONL or text file (a log, tsc output, lcov), and
    `Snippet(path, from, to)` reads lines of a file, so the model doesn't

@@ -47,6 +47,16 @@ const ACTION_LIST = [...ACTION_SPECS].map(([name, spec]) => signature(name, spec
 const ARROW_ONLY =
   "arrow functions can only be declared as a named function (`share = p => ...`) or passed to map, filter, find, some or every";
 
+/**
+ * Named args models reach for to style a component (lowercased). None exist:
+ * components draw in BB's theme, so the error says why instead of only that.
+ */
+const STYLE_ARGS: Record<string, true> = {
+  color: true, colour: true, background: true, backgroundcolor: true, bg: true, fill: true, size: true,
+  fontsize: true, font: true, fontweight: true, weight: true, bold: true, border: true, padding: true,
+  margin: true, width: true, height: true, style: true, classname: true, class: true, shadow: true, radius: true,
+};
+
 /** The type of a value, as named in diagnostics. */
 export type Kind = "null" | "boolean" | "number" | "string" | "list" | "object" | "node" | "action" | "binding";
 
@@ -513,7 +523,11 @@ class Validator {
       const index = spec.params.findIndex((param) => param.name === arg.name);
       if (index < 0) {
         const hint = didYouMean(arg.name, spec.params.map((param) => param.name));
-        this.diagnostics.report(arg.pos, `\`${expr.name}\` has no parameter \`${arg.name}\`.${hint} ${sig}`);
+        const why =
+          hint === "" && Object.hasOwn(STYLE_ARGS, arg.name.toLowerCase())
+            ? ` Components draw in BB's theme and take no style arguments${spec.params.some((param) => param.name === "tone") ? "; use `tone:` (good, warn, bad, info) for a status colour" : ""}.`
+            : hint;
+        this.diagnostics.report(arg.pos, `\`${expr.name}\` has no parameter \`${arg.name}\`.${why} ${sig}`);
       } else if (slots[index] !== undefined) {
         this.diagnostics.report(arg.pos, `\`${arg.name}\` is given twice: ${sig}`);
       } else {
