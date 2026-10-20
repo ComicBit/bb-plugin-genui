@@ -4,7 +4,7 @@ What changed in each version of the Generative UI plugin for BB. Update an insta
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.2.6] - 2026-10-21
 
 ### Added
 - An **Animations** setting, on by default, beside *Web lookups*. Off, nothing in inline UI moves: entrances, chart draws, height glides, smooth scrolls, CSS transitions and pulses stop, and 3D scenes and shaders hold a still frame. The system's reduced-motion setting is honoured either way.
@@ -71,7 +71,7 @@ Not released separately on GitHub; included in 0.2.2.
 
 First release: agents answer with ```ui blocks (86 components in 10 groups, from cards, tables and charts to maps, boards, roadmaps and quizzes), interactive without extra model calls, reading files instead of retyped numbers, and sandboxed ```app blocks for anything else.
 
-[Unreleased]: https://github.com/ComicBit/bb-plugin-genui/compare/v0.2.5...HEAD
+[0.2.6]: https://github.com/ComicBit/bb-plugin-genui/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/ComicBit/bb-plugin-genui/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/ComicBit/bb-plugin-genui/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/ComicBit/bb-plugin-genui/compare/v0.2.2...v0.2.3
