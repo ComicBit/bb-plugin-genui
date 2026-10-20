@@ -9,6 +9,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Added
 - An **Animations** setting, on by default, beside *Web lookups*. Off, nothing in inline UI moves: entrances, chart draws, height glides, smooth scrolls, CSS transitions and pulses stop, and 3D scenes and shaders hold a still frame. The system's reduced-motion setting is honoured either way.
 
+## [0.2.5] - 2026-10-21
+
+### Fixed
+- Installing from GitHub (`bb plugin install git:github.com/ComicBit/bb-plugin-genui@^0.2.0` or the repository URL) failed since 0.2.0: BB installs only `dependencies` before building, and three.js and the GLSL parser were listed as dev dependencies, so the build couldn't find them. Both are now runtime dependencies.
+
 ## [0.2.4] - 2026-10-21
 
 ### Added
@@ -66,7 +71,8 @@ Not released separately on GitHub; included in 0.2.2.
 
 First release: agents answer with ```ui blocks (86 components in 10 groups, from cards, tables and charts to maps, boards, roadmaps and quizzes), interactive without extra model calls, reading files instead of retyped numbers, and sandboxed ```app blocks for anything else.
 
-[Unreleased]: https://github.com/ComicBit/bb-plugin-genui/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/ComicBit/bb-plugin-genui/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/ComicBit/bb-plugin-genui/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/ComicBit/bb-plugin-genui/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/ComicBit/bb-plugin-genui/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/ComicBit/bb-plugin-genui/compare/v0.2.0...v0.2.2
