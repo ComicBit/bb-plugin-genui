@@ -4,6 +4,9 @@ import { createRoot, type Root } from "react-dom/client";
 import type { PluginSettingsState } from "@get-bb/plugin-sdk/app";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+/** Vitest's jsdom environment exposes the JSDOM instance; only its window is used here. */
+declare const jsdom: { window: Window };
+
 /** The plugin's settings as BB serves them: a store its subscribers re-render from, like BB's query. */
 const settings = vi.hoisted(() => {
   let state: PluginSettingsState = { values: undefined, isLoading: true };
@@ -64,6 +67,8 @@ beforeEach(() => {
   vi.stubGlobal("CSS", { supports: () => false });
   animate.mockClear();
   Object.defineProperty(Element.prototype, "animate", { configurable: true, value: animate });
+  // Node 25+ has its own global localStorage (undefined without --localstorage-file), which hides jsdom's.
+  vi.stubGlobal("localStorage", jsdom.window.localStorage);
   localStorage.clear();
   settings.set(LOADING);
   container = document.createElement("div");
