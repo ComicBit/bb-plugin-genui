@@ -89,4 +89,27 @@ describe("checkSpec", () => {
     expect(ok).toBe(true);
     expect(report).toMatch(/^No errors\. Tried 2 interactions\./);
   });
+
+  it("reports a broken shader with its pass and line", async () => {
+    const spec = 'Card("x", [Shader(`\nvoid mainImage(out vec4 fragColor, in vec2 fragCoord) {\n  fragColor = vec4(nope, 1.0);\n}\n`)])';
+    const { ok, report } = await checkSpec(spec, noFiles);
+    expect(ok).toBe(false);
+    expect(report).toContain("1:12 error: Shader: image, line 3: `nope` is not declared");
+    expect(report).toContain("_GPU shader (1 pass). Open this reply in BB to see it._");
+  });
+
+  it("reports a scene that breaks once it moves, and asset files it can't read", async () => {
+    const spec = 'Scene(t => t > 1 ? [{shape: "box", at: [0, 0, 0], colour: "chart1"}] : [])\nScene([{shape: "model", src: "chair.glb"}, {shape: "environment", src: "big.hdr"}])';
+    const requested: DataRequest[] = [];
+    const { ok, report } = await checkSpec(spec, async (request): Promise<LoadedData> => {
+      requested.push(request);
+      // A binary file is "not a text file" to a raw read, yet it exists.
+      return request.path === "big.hdr" ? { ok: false, error: "not a text file" } : { ok: false, error: "file not found" };
+    });
+    expect(ok).toBe(false);
+    expect(report).toContain("1:1 error: Scene at t=1.5: object 0 (box): unknown field `colour`. Did you mean `color`?");
+    expect(report).toContain("2:1 error: chair.glb: file not found");
+    expect(report).not.toContain("big.hdr");
+    expect(requested).toEqual([{ path: "chair.glb", raw: true }, { path: "big.hdr", raw: true }]);
+  });
 });

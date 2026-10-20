@@ -70,6 +70,7 @@ export function LiveUi({
   loadImage,
   readText,
   loadAudio,
+  loadAsset,
   superseded = false,
   threadId,
   blockKey,
@@ -87,6 +88,7 @@ export function LiveUi({
   loadImage: UiRuntime["loadImage"];
   readText: UiRuntime["readText"];
   loadAudio: UiRuntime["loadAudio"];
+  loadAsset: UiRuntime["loadAsset"];
   /** A later user message exists in the thread (see UiRuntime.superseded). */
   superseded?: boolean;
   threadId: UiRuntime["threadId"];
@@ -177,6 +179,7 @@ export function LiveUi({
       loadImage,
       readText,
       loadAudio,
+      loadAsset,
       answer,
       superseded,
       threadId,
@@ -189,7 +192,7 @@ export function LiveUi({
         }
       },
     }),
-    [setValue, openFile, loadImage, readText, loadAudio, answer, superseded, threadId, blockKey, runAction],
+    [setValue, openFile, loadImage, readText, loadAudio, loadAsset, answer, superseded, threadId, blockKey, runAction],
   );
 
   const { roots, diagnostics } = useMemo(() => evaluate(program, state, data), [program, state, data]);

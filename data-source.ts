@@ -63,6 +63,20 @@ const AUDIO_TYPES: Readonly<Record<string, string>> = {
 /** A recording is bigger than a picture: about 13 minutes of 16 kHz mono WAV. */
 export const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 
+/** Files a Scene loads (models, environments, textures), by extension; the MIME type is ours. */
+const ASSET_TYPES: Readonly<Record<string, string>> = {
+  glb: "model/gltf-binary",
+  gltf: "model/gltf+json",
+  hdr: "image/vnd.radiance",
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  webp: "image/webp",
+};
+
+/** A model with its textures, or an HDR environment, is bigger than a picture. */
+export const MAX_ASSET_BYTES = 10 * 1024 * 1024;
+
 export type LoadedImage = { readonly ok: true; readonly dataUrl: string } | { readonly ok: false; readonly error: string };
 
 interface Root {
@@ -202,6 +216,12 @@ export function loadThreadAudio(bb: BbPluginApi, threadId: string, requested: st
   return loadMediaWith(read, requested, AUDIO_TYPES, MAX_AUDIO_BYTES, "recordings");
 }
 
+/** Reads one file a Scene names (a model, environment or texture) for a thread as a data URL. Failures are values. */
+export function loadThreadAsset(bb: BbPluginApi, threadId: string, requested: string): Promise<LoadedImage> {
+  const read: FileReader = (target, maxBytes) => readThreadFile(bb, threadId, target, maxBytes);
+  return loadMediaWith(read, requested, ASSET_TYPES, MAX_ASSET_BYTES, "files");
+}
+
 /** A path in this plugin's package: the bundle runs from dist/, tests from the root. */
 export function packagePath(...parts: string[]): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -249,7 +269,11 @@ async function readGalleryFile(requested: string, maxBytes: number): Promise<Fil
     const { size } = await stat(target);
     if (size > maxBytes) return { ok: false, error: `${size} bytes is over the ${maxBytes}-byte limit` };
     const extension = /\.([^./\\]+)$/.exec(requested)?.[1].toLowerCase() ?? "";
-    const binary = (Object.hasOwn(IMAGE_TYPES, extension) && extension !== "svg") || Object.hasOwn(AUDIO_TYPES, extension);
+    // Text formats (svg, an embedded .gltf) stay UTF-8; everything else is bytes, which UTF-8 would mangle.
+    const binary =
+      (Object.hasOwn(IMAGE_TYPES, extension) && extension !== "svg") ||
+      Object.hasOwn(AUDIO_TYPES, extension) ||
+      (Object.hasOwn(ASSET_TYPES, extension) && extension !== "gltf");
     const content = await readFile(target);
     return binary
       ? { ok: true, content: content.toString("base64"), encoding: "base64" }
@@ -270,4 +294,8 @@ export function loadGalleryImage(requested: string): Promise<LoadedImage> {
 
 export function loadGalleryAudio(requested: string): Promise<LoadedImage> {
   return loadMediaWith(readGalleryFile, requested, AUDIO_TYPES, MAX_AUDIO_BYTES, "recordings");
+}
+
+export function loadGalleryAsset(requested: string): Promise<LoadedImage> {
+  return loadMediaWith(readGalleryFile, requested, ASSET_TYPES, MAX_ASSET_BYTES, "files");
 }

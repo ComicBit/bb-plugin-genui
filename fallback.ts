@@ -19,9 +19,12 @@ import {
   type LoadedData,
   type SearchedImage,
 } from "./core";
+import { checkShader } from "./core/glsl-check";
 import { projectRequests, toMarkdownWithProject } from "./core/markdown";
 import { projectRequestKey, type ProjectRequest, type ProjectResult } from "./core/project";
-import type { UiNode } from "./core/types";
+import { readScene, sceneAssets } from "./core/scene";
+import { shaderInputNames, shaderPasses } from "./core/shader-args";
+import type { UiNode, Value } from "./core/types";
 
 /** Fetches one file a spec reads: parsed for Load, raw text for Snippet. */
 type Loader = (request: DataRequest) => Promise<LoadedData>;
@@ -110,11 +113,66 @@ export async function renderReplyMarkdown(text: string, load: Loader, find?: Ima
   return output.join("\n");
 }
 
+/** A Scene is read again at this time, so a scene that breaks once it moves is caught too (t = 0 is the evaluation's). */
+const SCENE_CHECK_TIME = 1.5;
+
+/** The largest 3D asset the renderer loads (load_asset). */
+const MAX_ASSET_BYTES = 10 * 1024 * 1024;
+
+/** Every Scene and Shader node in `roots`, children included. */
+function gpuNodes(value: Value | readonly UiNode[], out: UiNode[] = []): UiNode[] {
+  if (Array.isArray(value)) {
+    for (const item of value) gpuNodes(item, out);
+  } else if (typeof value === "object" && value !== null && "kind" in value && value.kind === "node") {
+    const node = value as UiNode;
+    if (node.type === "Scene" || node.type === "Shader") out.push(node);
+    for (const prop of Object.values(node.props)) gpuNodes(prop, out);
+  }
+  return out;
+}
+
+/**
+ * What a raw read says about a 3D asset: a binary file comes back "not a
+ * text file" and a big one over the data limit, yet both exist and the
+ * renderer's own loader reads them. Anything else is the reason it can't.
+ */
+function assetProblem(result: LoadedData): string | null {
+  if (result.ok || result.error === "not a text file") return null;
+  const bytes = /^(\d+) bytes is over the/.exec(result.error)?.[1];
+  if (bytes === undefined) return result.error;
+  return Number(bytes) > MAX_ASSET_BYTES ? `${bytes} bytes is over the ${MAX_ASSET_BYTES}-byte limit` : null;
+}
+
+/** GLSL errors, a Scene that fails once it moves, and asset files Scene and Shader can't read: `line:column error: …`, as diagnostics read. */
+async function gpuProblems(roots: readonly UiNode[], load: Loader): Promise<string[]> {
+  const problems = new Set<string>();
+  const assets = new Map<string, string>();
+  for (const node of gpuNodes(roots)) {
+    const at = /^\d+:\d+/.exec(node.key)?.[0] ?? "1:1";
+    if (node.type === "Scene") {
+      const later = readScene(node.props.objects ?? null, SCENE_CHECK_TIME);
+      for (const error of later.errors) problems.add(`${at} error: Scene at t=${SCENE_CHECK_TIME}: ${error}`);
+      const paths = [...sceneAssets(readScene(node.props.objects ?? null, 0).objects), ...sceneAssets(later.objects)];
+      for (const path of paths) if (!assets.has(path)) assets.set(path, at);
+    } else {
+      const textures = Array.isArray(node.props.textures) ? node.props.textures : [];
+      for (const error of checkShader(shaderPasses(node.props), shaderInputNames(node.props), textures.length)) {
+        problems.add(`${at} error: Shader: ${error}`);
+      }
+      for (const path of textures) if (typeof path === "string" && !assets.has(path)) assets.set(path, at);
+    }
+  }
+  const read = await Promise.all([...assets].map(async ([path, at]) => [path, at, assetProblem(await load({ path, raw: true }))] as const));
+  for (const [path, at, problem] of read) if (problem !== null) problems.add(`${at} error: ${path}: ${problem}`);
+  return [...problems];
+}
+
 /**
  * What the check_ui tool tells the agent about one ```ui block: why it fails
  * to compile, which files Load and Snippet can't read, evaluation errors, the
- * errors its inputs cause once used (each slider end, toggle, option...), and
- * otherwise the text version of what the user will see.
+ * errors its inputs cause once used (each slider end, toggle, option...),
+ * shader GLSL errors, a Scene that fails once it moves, unreadable 3D asset
+ * files, and otherwise the text version of what the user will see.
  */
 export async function checkSpec(
   spec: string,
@@ -136,6 +194,7 @@ export async function checkSpec(
   const problems = [
     ...loaded.flatMap(([request, result]) => (result.ok ? [] : [`${request.path}: ${result.error}`])),
     ...(diagnostics.length > 0 ? [formatDiagnostics(diagnostics)] : []),
+    ...(await gpuProblems(roots, load)),
     ...probed.failures.map(({ probe, diagnostics }) => `After ${probe.describe}:\n${formatDiagnostics(diagnostics)}`),
   ];
   const tried = probed.tried === 0 ? "" : ` Tried ${probed.tried} interaction${probed.tried === 1 ? "" : "s"}.`;

@@ -35,6 +35,8 @@ import { Pipeline } from "./components/Pipeline";
 import { Provenance } from "./components/Provenance";
 import { PullRequest } from "./components/pullRequest";
 import { Entity, Hotspots, Sources } from "./components/references";
+import { Scene } from "./components/Scene";
+import { Shader } from "./components/Shader";
 import { StackTrace } from "./components/StackTrace";
 import { Table } from "./components/Table";
 import { Tests } from "./components/Tests";
@@ -135,6 +137,8 @@ const RENDERERS = {
   Provenance,
   Acceptance,
   Transcript,
+  Scene,
+  Shader,
 } satisfies Record<ComponentName, ComponentType<{ props: Props }>>;
 
 export function RenderNode({ node }: { node: UiNode }): ReactNode {

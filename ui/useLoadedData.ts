@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRpc } from "@get-bb/plugin-sdk/app";
 import { collectLoads, dataKey, type DataRequest, type LoadedData, type Program } from "../core";
 import type { rpcContract } from "../server";
-import type { ImageUrl, TextFile } from "./runtime";
+import type { AssetBytes, ImageUrl, TextFile } from "./runtime";
 
 /** Where a spec's files come from: a thread's workspace and storage, or the gallery. */
 export type FileScope = { readonly threadId: string } | "gallery";
@@ -19,6 +19,7 @@ interface Loaders {
   data(path: string, raw: boolean | undefined): Promise<LoadedData>;
   image(path: string): Promise<LoadedImage>;
   audio(path: string): Promise<LoadedImage>;
+  asset(path: string): Promise<LoadedImage>;
 }
 
 /** Stable per thread (or gallery), however the caller builds its scope object. */
@@ -40,6 +41,10 @@ function useLoaders(scope: FileScope): Loaders {
         threadId === null
           ? (path) => rpc.call("gallery_audio", { path })
           : (path) => rpc.call("load_audio", { threadId, path }),
+      asset:
+        threadId === null
+          ? (path) => rpc.call("gallery_asset", { path })
+          : (path) => rpc.call("load_asset", { threadId, path }),
     };
   }, [rpc, threadId]);
 }
@@ -149,12 +154,7 @@ export function useAudioLoader(scope: FileScope): (src: string) => Promise<Image
       const pending = loaders.audio(src).then(
         (loaded): ImageUrl => {
           if (!loaded.ok) return loaded;
-          // data:<type>;base64,<bytes>, decoded here rather than fetched: BB's CSP may refuse data: fetches.
-          const comma = loaded.dataUrl.indexOf(",");
-          const type = loaded.dataUrl.slice(5, loaded.dataUrl.indexOf(";"));
-          const binary = atob(loaded.dataUrl.slice(comma + 1));
-          const bytes = new Uint8Array(binary.length);
-          for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+          const { bytes, type } = decodeDataUrl(loaded.dataUrl);
           return { ok: true, url: URL.createObjectURL(new Blob([bytes], { type })) };
         },
         (cause: unknown): ImageUrl => ({ ok: false, error: cause instanceof Error ? cause.message : String(cause) }),
@@ -168,6 +168,53 @@ export function useAudioLoader(scope: FileScope): (src: string) => Promise<Image
         AUDIO.delete(oldestKey);
         void oldest.then((audio) => audio.ok && URL.revokeObjectURL(audio.url));
       }
+      return pending;
+    },
+    [loaders, scopeKey],
+  );
+}
+
+/** data:<type>;base64,<bytes>, decoded here rather than fetched: BB's CSP may refuse data: fetches. */
+function decodeDataUrl(dataUrl: string): { bytes: ArrayBuffer; type: string } {
+  const comma = dataUrl.indexOf(",");
+  const type = dataUrl.slice(5, dataUrl.indexOf(";"));
+  const binary = atob(dataUrl.slice(comma + 1));
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+  return { bytes: bytes.buffer, type };
+}
+
+/**
+ * Scene files already read in this page (models, environments, textures),
+ * by scope and path, so a Scene that drops its GPU context while scrolled
+ * away rebuilds at once when it comes back. A few at most: up to 10 MB each.
+ */
+const ASSETS = new Map<string, Promise<AssetBytes>>();
+const MAX_ASSETS = 12;
+
+/** Reads Scene files (thread or gallery files; no web URLs) for `UiRuntime.loadAsset`. */
+export function useAssetLoader(scope: FileScope): (src: string) => Promise<AssetBytes> {
+  const loaders = useLoaders(scope);
+  const scopeKey = scope === "gallery" ? "gallery" : scope.threadId;
+  return useCallback(
+    (src: string) => {
+      const key = `${scopeKey}|${src}`;
+      const cached = ASSETS.get(key);
+      if (cached !== undefined) {
+        // Most recently used last, so the oldest unused file goes first.
+        ASSETS.delete(key);
+        ASSETS.set(key, cached);
+        return cached;
+      }
+      const pending = loaders.asset(src).then(
+        (loaded): AssetBytes => (loaded.ok ? { ok: true, ...decodeDataUrl(loaded.dataUrl) } : loaded),
+        (cause: unknown): AssetBytes => ({ ok: false, error: cause instanceof Error ? cause.message : String(cause) }),
+      );
+      ASSETS.set(key, pending);
+      void pending.then((asset) => {
+        if (!asset.ok) ASSETS.delete(key);
+      });
+      if (ASSETS.size > MAX_ASSETS) ASSETS.delete(ASSETS.keys().next().value!);
       return pending;
     },
     [loaders, scopeKey],

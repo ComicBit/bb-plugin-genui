@@ -15,6 +15,7 @@ export const GALLERY_GROUPS: readonly ComponentGroup[] = [
   "Dev",
   "Manage",
   "Evidence",
+  "3D",
 ];
 
 /** A group's components in catalog order. */

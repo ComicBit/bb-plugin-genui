@@ -139,7 +139,11 @@ The internals behind [the README](../README.md): how agents learn the language, 
    svg or avif files (5 MB cap) through the `load_image` RPC. Paths are
    workspace-relative, `$BB_THREAD_STORAGE/…`, or absolute. Components that
    show code at a location their data names (a stack frame, a finding, an
-   uncovered line) read the file through `runtime.readText`. The backend
+   uncovered line) read the file through `runtime.readText`. A Scene's
+   models, environments and textures (glb, gltf, hdr, png, jpg, webp; 10 MB
+   cap) come through the `load_asset` RPC as bytes (`runtime.loadAsset`),
+   decoded in the browser without fetching (glTF buffers and images
+   included), since BB's CSP may refuse data: and blob: fetches. The backend
    (`data-source.ts`) only reads inside the thread's workspace, its thread
    storage and `/tmp` on the environment's host, where agents and their tools
    save screenshots and reports. BB refuses a symlinked root and macOS's
@@ -239,6 +243,30 @@ the instructions list it.
     each stage with its facts and receipt; facts that differ from what was
     asked for, or between stages, are flagged, and the chain says where its
     receipts stop.
+- 3D, matching Zeron's `ui.scene` and `ui.shader`: Scene draws objects
+  (`{shape, ...}` records: solids with materials, surfaces, meshes, lines,
+  points, labels, glTF models, an HDR environment, sprites) and Shader runs
+  Shadertoy-style GLSL passes. A Scene's objects can be a function
+  `t => [...]`, and a surface's `f` one of `(x, z)`: the language passes an
+  arrow (or a named function by name) as a `FunctionValue` that closes over
+  the evaluation and runs with its own step budget per call, so the renderer
+  calls it every frame without re-evaluating the spec. `core/scene.ts`
+  (`readScene`) checks every object strictly (an unknown field is an error
+  naming the object) and fills Zeron's defaults, for the renderer and for
+  evaluation, which reads the scene at t = 0; check_ui reads it again at
+  t = 1.5, parses each shader pass with `core/glsl-check.ts` (errors by
+  pass and line; server only, so the GLSL parser stays out of the page) and
+  reports model, environment and texture files it can't read. The
+  instructions carry one brief line; `ui_examples` returns the full API.
+  Scene renders with three.js (`ui/components/sceneWorld.ts`): a key light
+  with soft shadows on an invisible catcher, bloom from `glow`, physical
+  glass with dispersion, PMREM environments, objects reused by index across
+  frames. Shader is raw WebGL2 (`shaderGl.ts`) with float ping-pong buffers,
+  Zeron's `light`/`alpha`/`opaque` blends, edge fade and a dither against
+  8-bit banding. Both draw on a transparent canvas in theme colours
+  (`gpu.ts` resolves tokens) and hold a WebGL context only near the screen,
+  at most six at once, the rest showing their last frame as an image at the
+  same height. On touch, vertical swipes keep scrolling the thread.
 
 What the user changes inside a component without a `$state` (weights,
 unchecked steps, filters) is kept per block with `ui/usePersistedState.ts`,
@@ -303,6 +331,9 @@ pilot stored.
 - `core/`: the spec language. It has a lexer, a parser, a validator against
   `core/catalog.ts`, a tree-walking interpreter with no `eval` (with step,
   node and list limits), and `compileStreaming`. It is pure TypeScript.
+  `scene.ts` and `shader-args.ts` read the 3D components' arguments,
+  `glsl.ts` builds shader sources and maps errors to the agent's lines, and
+  `glsl-check.ts` checks shader GLSL without a GPU (server only).
 - `ui/`:
   - `Fence.tsx`: the shared renderer.
   - `SlotFence.tsx`: the native renderer slot, including terminal status policy.

@@ -1,10 +1,13 @@
 import type { ArrowExpr, CallExpr, Expr, Program } from "./ast";
-import { FORBIDDEN_PROPERTIES, LIMITS, type ComponentName, type ComponentSpec, type ParamSpec } from "./catalog";
+import { CONSTANTS, FORBIDDEN_PROPERTIES, LIMITS, type ComponentName, type ComponentSpec, type ParamSpec } from "./catalog";
 import { DiagnosticList, type Pos } from "./diagnostics";
 import { dataKey, languageOf, snippetLines, snippetRangeError, type LoadedData } from "./data";
-import type { Action, Binding, Diagnostic, UiNode, UiState, Value } from "./types";
+import { sceneErrors } from "./scene";
+import { shaderErrors } from "./shader-args";
+import type { Action, Binding, Diagnostic, FunctionValue, UiNode, UiState, Value } from "./types";
 import {
   ACTION_SPECS,
+  ARROW_ONLY,
   COMPONENT_SPECS,
   coerceState,
   DESCRIPTIONS,
@@ -57,7 +60,7 @@ function kindOf(value: Value): Kind {
   if (typeof value === "string") return "string";
   if (Array.isArray(value)) return "list";
   // Object literals cannot carry these `kind` values (see the "object" case), so they mark interpreter output.
-  if ("kind" in value && (value.kind === "node" || value.kind === "action" || value.kind === "binding")) {
+  if ("kind" in value && (value.kind === "node" || value.kind === "action" || value.kind === "binding" || value.kind === "function")) {
     return value.kind;
   }
   return "object";
@@ -131,6 +134,22 @@ function compare(op: string, left: number | string, right: number | string): boo
   }
 }
 
+const BITS = new DataView(new ArrayBuffer(8));
+
+/**
+ * `random(i)`: a 0–1 hash of the number's bits (murmur3's finalizer over both
+ * halves), so a scene's scattered stars are the same on every render and
+ * device, unlike Math.random.
+ */
+function random(i: number): number {
+  BITS.setFloat64(0, i === 0 ? 0 : i); // -0 hashes as 0
+  let h = BITS.getUint32(0) ^ Math.imul(BITS.getUint32(4) ^ 0x9e3779b9, 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4_294_967_296;
+}
+
 /** Rounds half away from zero, exact for decimal inputs like 1.005. */
 function roundTo(value: number, digits: number): number {
   const magnitude = Math.abs(value);
@@ -162,6 +181,8 @@ interface Scope {
 class Interpreter {
   readonly diagnostics = new DiagnosticList();
   private steps = 0;
+  /** LIMITS.steps for the evaluation; LIMITS.functionSteps while a FunctionValue runs. */
+  private stepLimit: number = LIMITS.steps;
   private nodes = 0;
   private depth = 0;
   /** `#index` per enclosing map iteration, appended to node keys. */
@@ -184,13 +205,65 @@ class Interpreter {
   }
 
   expr(expr: Expr, scope: Scope | null): Value {
-    if (++this.steps > LIMITS.steps) {
-      throw new LimitError(expr.pos, `the UI needs more than ${LIMITS.steps} evaluation steps; simplify it`);
+    if (++this.steps > this.stepLimit) {
+      throw new LimitError(
+        expr.pos,
+        this.stepLimit === LIMITS.steps
+          ? `the UI needs more than ${LIMITS.steps} evaluation steps; simplify it`
+          : `one call of this function needs more than ${this.stepLimit} evaluation steps; simplify it`,
+      );
     }
     if (++this.depth > MAX_EVAL_DEPTH) throw new LimitError(expr.pos, "expressions are nested too deeply");
     const value = this.compute(expr, scope);
     this.depth--;
     return value;
+  }
+
+  /**
+   * An expression where a function may be a value (a list item, an object
+   * value, a `function` param): an arrow, or a named function by name,
+   * becomes a FunctionValue over `scope`.
+   */
+  private value(expr: Expr, scope: Scope | null): Value {
+    if (expr.type === "arrow") return this.closure(expr, scope);
+    if (expr.type === "ident") {
+      let shadowed = false;
+      for (let current = scope; current !== null && !shadowed; current = current.parent) shadowed = current.name === expr.name;
+      const own = this.program.named.get(expr.name)?.value;
+      // A named function sees only its parameters and top-level names (as callOwn).
+      if (!shadowed && own?.type === "arrow") return this.closure(own, null);
+    }
+    return this.expr(expr, scope);
+  }
+
+  private closure(fn: ArrowExpr, scope: Scope | null): FunctionValue {
+    const suffix = this.suffix;
+    return { kind: "function", params: fn.params, call: (args) => this.callClosure(fn, scope, suffix, args) };
+  }
+
+  /**
+   * Runs a FunctionValue: during this evaluation (a Scene read at t = 0) or
+   * any time after (each frame). It gets its own step budget and leaves the
+   * interpreter as it found it, so the renderer can call it again and again.
+   */
+  private callClosure(fn: ArrowExpr, scope: Scope | null, suffix: string, args: readonly Value[]): { value: Value; error: string | null } {
+    const saved = { steps: this.steps, stepLimit: this.stepLimit, nodes: this.nodes, depth: this.depth, suffix: this.suffix };
+    this.steps = 0;
+    this.stepLimit = LIMITS.functionSteps;
+    this.suffix = suffix;
+    let inner = scope;
+    fn.params.forEach((name, index) => {
+      inner = { name, value: index < args.length ? args[index] : null, parent: inner };
+    });
+    try {
+      return { value: this.expr(fn.body, inner), error: null };
+    } catch (error) {
+      if (error instanceof EvalFailure) return { value: null, error: error.message };
+      // A JS stack overflow or the like: still never thrown at the renderer.
+      return { value: null, error: error instanceof Error ? error.message : String(error) };
+    } finally {
+      Object.assign(this, saved);
+    }
   }
 
   private compute(expr: Expr, scope: Scope | null): Value {
@@ -210,17 +283,18 @@ class Interpreter {
         for (let current = scope; current !== null; current = current.parent) {
           if (current.name === expr.name) return current.value;
         }
+        if (Object.hasOwn(CONSTANTS, expr.name)) return CONSTANTS[expr.name];
         return this.named(expr.name, expr.pos);
       case "list":
         return checkLength(
-          expr.items.map((item) => this.expr(item, scope)),
+          expr.items.map((item) => this.value(item, scope)),
           expr.pos,
         );
       case "object": {
         const object: Record<string, Value> = {};
         for (const entry of expr.entries) {
-          const value = this.expr(entry.value, scope);
-          if (entry.key === "kind" && (value === "node" || value === "action" || value === "binding")) {
+          const value = this.value(entry.value, scope);
+          if (entry.key === "kind" && (value === "node" || value === "action" || value === "binding" || value === "function")) {
             throw new RuntimeError(entry.pos, `\`kind: "${value}"\` is reserved; use another key or value`);
           }
           object[entry.key] = value;
@@ -251,10 +325,7 @@ class Interpreter {
       case "method":
         return this.method(expr, scope);
       case "arrow":
-        throw new RuntimeError(
-          expr.pos,
-          "arrow functions can only be declared as a named function (`share = p => ...`) or passed to map, filter, find, some or every",
-        );
+        throw new RuntimeError(expr.pos, ARROW_ONLY);
     }
   }
 
@@ -392,6 +463,11 @@ class Interpreter {
         const value = this.param(param, arg, scope, `${call.name} ${param.name}`, key);
         if (value !== undefined) props[param.name] = value;
       });
+      const problems = type === "Scene" ? sceneErrors(props, 0) : type === "Shader" ? shaderErrors(props) : [];
+      if (problems.length > 0) {
+        const more = problems.length > 3 ? `; and ${problems.length - 3} more` : "";
+        throw new RuntimeError(call.pos, `${type}: ${problems.slice(0, 3).join("; ")}${more}`);
+      }
       return this.node(type, key, type === "Snippet" ? this.snippet(props) : props, call.pos);
     } catch (error) {
       if (!(error instanceof RuntimeError)) throw error;
@@ -436,7 +512,7 @@ class Interpreter {
       const binding: Binding = { kind: "binding", name: arg.name, value: coerced };
       return binding;
     }
-    const value = this.expr(arg, scope);
+    const value = param.kind === "function" ? this.value(arg, scope) : this.expr(arg, scope);
     if (param.kind === "nodes") return this.children(value, arg.pos, label, key);
     if (param.kind === "actions") return this.actions(value, arg.pos, label);
     if (value === null) {
@@ -468,6 +544,7 @@ class Interpreter {
         if (isNumbers(value) || (isPlainObject(value) && Object.values(value).every(isNumbers))) return value;
         break;
       }
+      case "function":
       case "any":
         return value;
     }
@@ -563,6 +640,32 @@ class Interpreter {
         return finite(Math.sqrt(numberAt(0)));
       case "pow":
         return finite(numberAt(0) ** numberAt(1));
+      case "sin":
+      case "cos":
+      case "tan":
+      case "asin":
+      case "acos":
+      case "atan":
+        return finite(Math[name](numberAt(0)));
+      case "atan2":
+        return finite(Math.atan2(numberAt(0), numberAt(1)));
+      case "clamp":
+        return Math.min(numberAt(2), Math.max(numberAt(1), numberAt(0)));
+      case "lerp":
+        return finite(numberAt(0) + (numberAt(1) - numberAt(0)) * numberAt(2));
+      case "range": {
+        const start = numberAt(0);
+        const step = args.length > 2 ? numberAt(2) : 1;
+        if (step === 0) throw new RuntimeError(call.args[2].pos, "range() step cannot be 0");
+        const count = Math.max(0, Math.ceil((numberAt(1) - start) / step));
+        if (count > LIMITS.listLength) {
+          throw new RuntimeError(call.pos, `range() would make ${count} items; lists are limited to ${LIMITS.listLength}`);
+        }
+        // start + i * step, not repeated addition, so the 100th item carries no accumulated error.
+        return Array.from({ length: count }, (_, index) => start + index * step);
+      }
+      case "random":
+        return random(numberAt(0));
       case "sum":
         return finite(this.numbers(args[0], call.args[0].pos, "sum()").reduce((total, n) => total + n, 0));
       case "min":

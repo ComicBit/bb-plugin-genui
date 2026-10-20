@@ -22,6 +22,12 @@ export type ParamKind =
   | "binding"
   /** An action call or a list of action calls. Normalized to Action[]. */
   | "actions"
+  /**
+   * A value, or a function the renderer calls for it (an arrow `t => ...`,
+   * or a named function passed by name). Arrives as the value, or as a
+   * FunctionValue.
+   */
+  | "function"
   /** Any value. */
   | "any";
 
@@ -48,7 +54,7 @@ export interface ComponentSpec {
 }
 
 /** Instruction-prompt grouping; one line per group. */
-export type ComponentGroup = "Layout" | "Content" | "Media" | "Data" | "Inputs" | "Widgets" | "Project" | "Dev" | "Manage" | "Evidence";
+export type ComponentGroup = "Layout" | "Content" | "Media" | "Data" | "Inputs" | "Widgets" | "Project" | "Dev" | "Manage" | "Evidence" | "3D";
 
 export interface CatalogComponentSpec extends ComponentSpec {
   readonly group: ComponentGroup;
@@ -315,12 +321,12 @@ export const COMPONENTS = {
       { name: "icon", kind: "string", optional: true },
     ],
     summary:
-      "no action sends its label as the user's reply; primary for the one main action, destructive for deleting or discarding; icon: lucide name",
+      "no action sends its label as the user's reply; primary: the one main action; destructive: deleting or discarding; icon: lucide name",
   },
   Form: {
     group: "Inputs",
     params: [children, { name: "submit", kind: "string", optional: true }],
-    summary: "one labeled field per question; submit sends every answer in one message",
+    summary: "one labeled field per question; submit sends all answers in one message",
   },
   Timer: {
     group: "Widgets",
@@ -345,7 +351,7 @@ export const COMPONENTS = {
       { name: "alt", kind: "string", optional: true },
       { name: "aspect", kind: "enum", optional: true, values: ["wide", "square", "tall"] },
     ],
-    summary: "a photo found on the web from a description, credited; for things no file shows; aspect wide by default",
+    summary: "a credited web photo of a description, for things no file shows; wide by default",
   },
   Gallery: {
     group: "Media",
@@ -361,7 +367,7 @@ export const COMPONENTS = {
       { name: "places", kind: "list" },
       { name: "route", kind: "boolean", optional: true },
     ],
-    summary: "{name, lat?, lng?, note?}; names without lat/lng are looked up; route joins them in order",
+    summary: "{name, lat?, lng?, note?}; names without lat/lng are looked up; route joins them",
   },
   Hotspots: {
     group: "Media",
@@ -447,7 +453,7 @@ export const COMPONENTS = {
   EditableTable: {
     group: "Inputs",
     params: [{ name: "value", kind: "binding", holds: "list" }, { name: "columns", kind: "list" }, label],
-    summary: "state: list of row objects; columns: keys or {key, label?, type?: text|number|boolean}, type inferred if omitted",
+    summary: "state: list of row objects; columns: keys or {key, label?, type?: text|number|boolean}",
   },
   FollowUps: {
     group: "Inputs",
@@ -457,7 +463,7 @@ export const COMPONENTS = {
   Walkthrough: {
     group: "Widgets",
     params: [{ name: "steps", kind: "list" }],
-    summary: "{title, body, code?, language?} revealed one step at a time",
+    summary: "{title, body, code?, language?} one step at a time",
   },
   // Project: the first four read BB's own state for the reply's thread, so the
   // model writes no data at all; Tests and Json take Load() of a report.
@@ -524,7 +530,7 @@ export const COMPONENTS = {
   Dependencies: {
     group: "Dev",
     params: [{ name: "report", kind: "any" }],
-    summary: "Load npm outdated/audit --json or pip list --outdated --format=json; or [{name, current, latest}]",
+    summary: "Load npm outdated/audit --json, pip list --outdated --format=json, or [{name, current, latest}]",
   },
   Pipeline: {
     group: "Dev",
@@ -565,7 +571,7 @@ export const COMPONENTS = {
   Plan: {
     group: "Manage",
     params: [{ name: "steps", kind: "list" }, { name: "submit", kind: "string", optional: true }],
-    summary: "steps the user approves before you start [{title, detail?, files?, risk?, estimate?}]",
+    summary: "steps the user approves first [{title, detail?, files?, risk?, estimate?}]",
   },
   Decision: {
     group: "Manage",
@@ -610,6 +616,37 @@ export const COMPONENTS = {
     params: [{ name: "stages", kind: "list" }, { name: "expected", kind: "any", optional: true }],
     summary:
       "which build/revision is really installed or deployed where: [{name, status, facts?: {branch, sha, build, device}}], source to live; expected flags mismatches",
+  },
+  // 3D: Zeron's ui.scene and ui.shader. The full object and uniform reference
+  // is in the gallery examples' notes (ui_examples), not the instructions.
+  Scene: {
+    group: "3D",
+    params: [
+      { name: "objects", kind: "function" },
+      { name: "height", kind: "number", optional: true },
+      { name: "camera", kind: "any", optional: true },
+      { name: "orbit", kind: "boolean", optional: true },
+      { name: "spin", kind: "number", optional: true },
+      { name: "animate", kind: "boolean", optional: true },
+    ],
+    summary: "[{shape, at, …}] or t => [...] per frame",
+  },
+  Shader: {
+    group: "3D",
+    params: [
+      { name: "code", kind: "string" },
+      { name: "height", kind: "number", optional: true },
+      { name: "buffers", kind: "list", optional: true },
+      { name: "inputs", kind: "any", optional: true },
+      { name: "textures", kind: "list", optional: true },
+      { name: "blend", kind: "enum", optional: true, values: ["light", "alpha", "opaque"] },
+      { name: "bloom", kind: "number", optional: true },
+      { name: "orbit", kind: "boolean", optional: true },
+      { name: "spin", kind: "number", optional: true },
+      { name: "camera", kind: "any", optional: true },
+      { name: "animate", kind: "boolean", optional: true },
+    ],
+    summary: "Shadertoy GLSL",
   },
 } as const satisfies Record<string, CatalogComponentSpec>;
 
@@ -671,6 +708,17 @@ export const FUNCTIONS = {
   ceil: "ceil(x)",
   sqrt: "sqrt(x)",
   pow: "pow(x, y)",
+  sin: "sin(radians)",
+  cos: "cos(radians)",
+  tan: "tan(radians)",
+  asin: "asin(x) → radians",
+  acos: "acos(x) → radians",
+  atan: "atan(x) → radians",
+  atan2: "atan2(y, x) → radians",
+  clamp: "clamp(x, lo, hi)",
+  lerp: "lerp(a, b, t) → a + (b - a) * t",
+  range: "range(a, b, step?) → [a, a + step, …] up to b, exclusive",
+  random: "random(i) → 0–1, the same for the same i on every render",
   keys: "keys(object) → list of keys",
   values: "values(object) → list of values",
   entries: "entries(object) → list of [key, value]",
@@ -678,6 +726,9 @@ export const FUNCTIONS = {
 } as const;
 
 export type FunctionName = keyof typeof FUNCTIONS;
+
+/** Built-in names that read as numbers, for angles in 3D. */
+export const CONSTANTS: Readonly<Record<string, number>> = { PI: Math.PI, TAU: 2 * Math.PI };
 
 /** Whitelisted methods by receiver type. Anything else is an error. */
 export const METHODS = {
@@ -720,6 +771,12 @@ export const LIMITS = {
   sourceChars: 20_000,
   /** Interpreter steps per evaluate() call. */
   steps: 200_000,
+  /**
+   * Steps per call of a function a renderer calls (a Scene's `t => ...`, a
+   * surface's `f`): each call starts afresh, since a scene calls it every frame
+   * and a surface once per grid point.
+   */
+  functionSteps: 50_000,
   /** UiNodes produced per evaluate() call. */
   nodes: 2_000,
   /** Elements in any list produced or iterated. */

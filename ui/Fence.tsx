@@ -7,7 +7,7 @@ import { compileStreaming } from "../core";
 import { fileOpenTarget, THREAD_STORAGE_PREFIX } from "../core/file-target";
 import { AppBlock } from "./AppBlock";
 import { LiveUi, RenderFailure, sendThroughComposer } from "./LiveUi";
-import { useAudioLoader, useImageLoader, useLoadedData, useTextLoader } from "./useLoadedData";
+import { useAssetLoader, useAudioLoader, useImageLoader, useLoadedData, useTextLoader } from "./useLoadedData";
 import { useSuperseded } from "./useSuperseded";
 
 export type FenceLanguage = "ui" | "app";
@@ -124,6 +124,7 @@ function UiFence({
   const loadImage = useImageLoader({ threadId });
   const readText = useTextLoader({ threadId });
   const loadAudio = useAudioLoader({ threadId });
+  const loadAsset = useAssetLoader({ threadId });
   const send = useCallback((text: string) => actions.send(threadId, text), [actions, threadId]);
   const openFile = useCallback((path: string, line?: number) => actions.openFile(threadId, path, line), [actions, threadId]);
   const superseded = useSuperseded(threadId, messageId);
@@ -151,6 +152,7 @@ function UiFence({
       loadImage={loadImage}
       readText={readText}
       loadAudio={loadAudio}
+      loadAsset={loadAsset}
       superseded={superseded}
       threadId={threadId}
       blockKey={stateKey}

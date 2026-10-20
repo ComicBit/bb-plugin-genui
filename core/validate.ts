@@ -2,6 +2,7 @@ import type { CallExpr, Decl, Expr, Program, Statement } from "./ast";
 import {
   ACTIONS,
   COMPONENTS,
+  CONSTANTS,
   FORBIDDEN_PROPERTIES,
   FUNCTIONS,
   METHODS,
@@ -40,12 +41,14 @@ const FUNCTION_ARITY: ReadonlyMap<string, Arity> = new Map(
   Object.entries({
     round: [1, 2], fmt: [1, 2], sum: [1, 1], min: [1, Infinity], max: [1, Infinity], abs: [1, 1], Load: [1, 1],
     keys: [1, 1], values: [1, 1], entries: [1, 1], floor: [1, 1], ceil: [1, 1], sqrt: [1, 1], pow: [2, 2],
+    sin: [1, 1], cos: [1, 1], tan: [1, 1], asin: [1, 1], acos: [1, 1], atan: [1, 1], atan2: [2, 2],
+    clamp: [3, 3], lerp: [3, 3], range: [2, 3], random: [1, 1],
   } satisfies Record<FunctionName, Arity>),
 );
 
 const ACTION_LIST = [...ACTION_SPECS].map(([name, spec]) => signature(name, spec)).join(", ");
-const ARROW_ONLY =
-  "arrow functions can only be declared as a named function (`share = p => ...`) or passed to map, filter, find, some or every";
+export const ARROW_ONLY =
+  "arrow functions can only be declared as a named function (`share = p => ...`), passed to map, filter, find, some or every, or given as a value of a list or object (a Scene's `t => [...]`, a surface's `f`)";
 
 /**
  * Named args models reach for to style a component (lowercased). None exist:
@@ -58,7 +61,7 @@ const STYLE_ARGS: Record<string, true> = {
 };
 
 /** The type of a value, as named in diagnostics. */
-export type Kind = "null" | "boolean" | "number" | "string" | "list" | "object" | "node" | "action" | "binding";
+export type Kind = "null" | "boolean" | "number" | "string" | "list" | "object" | "node" | "action" | "binding" | "function";
 
 export const DESCRIPTIONS: Record<Kind, string> = {
   null: "null",
@@ -70,6 +73,7 @@ export const DESCRIPTIONS: Record<Kind, string> = {
   node: "a component",
   action: "an action",
   binding: "a state binding",
+  function: "a function",
 };
 
 export const EXPECTED: Record<ParamKind, string> = {
@@ -83,6 +87,7 @@ export const EXPECTED: Record<ParamKind, string> = {
   series: "a list of numbers or {name: [numbers]}",
   binding: "a `$state`",
   actions: "actions",
+  function: "a value or a function such as `t => [...]`",
   any: "a value",
 };
 
@@ -165,7 +170,7 @@ function editDistance(a: string, b: string): number {
 }
 
 /** " Did you mean `x`?" for the closest candidate within edit distance 2, else "". */
-function didYouMean(name: string, candidates: Iterable<string>, render = (candidate: string) => candidate): string {
+export function didYouMean(name: string, candidates: Iterable<string>, render = (candidate: string) => candidate): string {
   let best: string | undefined;
   let bestDistance = 3;
   for (const candidate of candidates) {
@@ -209,6 +214,9 @@ class Validator {
         continue;
       }
       this.forbidden(statement.name, statement.pos);
+      if (Object.hasOwn(CONSTANTS, statement.name)) {
+        this.diagnostics.report(statement.pos, `\`${statement.name}\` is a built-in constant; give your value another name`);
+      }
       const isState = statement.kind === "state";
       const previous = isState ? this.states.get(statement.name)?.decl : this.named.get(statement.name);
       if (previous !== undefined) {
@@ -353,7 +361,7 @@ class Validator {
         refs.states.push(expr);
         return;
       case "ident":
-        if (params.includes(expr.name)) return;
+        if (params.includes(expr.name) || Object.hasOwn(CONSTANTS, expr.name)) return;
         if (this.named.has(expr.name)) {
           if (this.named.get(expr.name)!.value.type === "arrow") {
             this.diagnostics.report(expr.pos, `\`${expr.name}\` is a function; call it, as in \`${expr.name}(...)\``);
@@ -364,12 +372,12 @@ class Validator {
         this.diagnostics.report(expr.pos, this.unknownName(expr.name, params));
         return;
       case "list":
-        for (const item of expr.items) this.check(item, params, refs);
+        for (const item of expr.items) this.checkValue(item, params, refs);
         return;
       case "object":
         for (const entry of expr.entries) {
           this.forbidden(entry.key, entry.pos);
-          this.check(entry.value, params, refs);
+          this.checkValue(entry.value, params, refs);
         }
         return;
       case "unary":
@@ -408,12 +416,27 @@ class Validator {
     }
   }
 
+  /**
+   * An expression where a function may be a value (a list item, an object
+   * value, a `function` param): an arrow, or a named function by name, which
+   * the renderer calls later.
+   */
+  private checkValue(expr: Expr, params: readonly string[], refs: Refs): void {
+    if (expr.type === "arrow") {
+      this.check(expr.body, [...params, ...expr.params], refs);
+    } else if (expr.type === "ident" && !params.includes(expr.name) && this.named.get(expr.name)?.value.type === "arrow") {
+      refs.named.push(expr);
+    } else {
+      this.check(expr, params, refs);
+    }
+  }
+
   private unknownName(name: string, params: readonly string[]): string {
     if (this.states.has(name)) return `\`${name}\` is not defined. Did you mean \`$${name}\`?`;
     if (COMPONENT_SPECS.has(name) || ACTION_SPECS.has(name) || FUNCTION_ARITY.has(name)) {
       return `\`${name}\` must be called, as in \`${name}(...)\``;
     }
-    const hint = didYouMean(name, [...params, ...this.named.keys()]);
+    const hint = didYouMean(name, [...params, ...this.named.keys(), ...Object.keys(CONSTANTS)]);
     return `\`${name}\` is not defined.${hint || ` Declare it first, as in \`${name} = ...\`.`}`;
   }
 
@@ -479,8 +502,15 @@ class Validator {
         }
       }
     }
-    for (const arg of expr.args) this.check(arg, params, refs);
-    for (const arg of expr.named) this.check(arg.value, params, refs);
+    // A catalog `function` param takes an arrow or a named function as its value.
+    const slots = [
+      ...expr.args.map((value, index) => ({ value, param: spec?.params[index] })),
+      ...expr.named.map((arg) => ({ value: arg.value, param: spec?.params.find((param) => param.name === arg.name) })),
+    ];
+    for (const { value, param } of slots) {
+      if (param?.kind === "function") this.checkValue(value, params, refs);
+      else this.check(value, params, refs);
+    }
   }
 
   private unknownCallee(name: string, params: readonly string[]): string {

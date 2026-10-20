@@ -16,8 +16,9 @@ export interface Diagnostic {
 export type Scalar = string | number | boolean | null;
 
 /**
- * Every value the renderer can receive as a component prop. Lambdas never
- * reach the renderer: they only exist while evaluating `map`/`filter`.
+ * Every value the renderer can receive as a component prop. Lambdas passed to
+ * `map`/`filter` never reach it; a function given where the catalog takes one
+ * (a Scene's `t => ...`, a surface's `f`) arrives as a FunctionValue.
  */
 export type Value =
   | Scalar
@@ -25,7 +26,24 @@ export type Value =
   | { readonly [key: string]: Value }
   | UiNode
   | Action
-  | Binding;
+  | Binding
+  | FunctionValue;
+
+/**
+ * A function the renderer calls (per frame, per surface point). It closes over
+ * the state and named values of the evaluation that made it, so a call never
+ * re-evaluates the program. Opaque to JSON, markdown and persistence.
+ */
+export interface FunctionValue {
+  readonly kind: "function";
+  readonly params: readonly string[];
+  /** Runs the function with a fresh step budget (LIMITS.functionSteps). Never throws. */
+  call(args: readonly Value[]): { readonly value: Value; readonly error: string | null };
+}
+
+export function isFunctionValue(value: unknown): value is FunctionValue {
+  return typeof value === "object" && value !== null && "kind" in value && value.kind === "function" && "call" in value && typeof value.call === "function";
+}
 
 /**
  * One evaluated component instance. `props` are keyed by the catalog param

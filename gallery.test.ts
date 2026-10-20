@@ -4,6 +4,7 @@ import type { UiNode } from "./core/types";
 import { COMPONENTS } from "./core/catalog";
 import { listGallery, loadGalleryFile, readGallerySpec } from "./data-source";
 import { examplesOf } from "./examples";
+import { checkSpec } from "./fallback";
 
 function errorNodes(nodes: readonly UiNode[]): string[] {
   const found: string[] = [];
@@ -50,6 +51,16 @@ describe("gallery", () => {
       // The examples are what agents copy: their inputs must work at every end too.
       const { failures } = probeInteractions(program, state, initial, data);
       expect(failures.map(({ probe, diagnostics }) => `after ${probe.describe}: ${formatDiagnostics(diagnostics)}`), name).toEqual([]);
+    }
+  });
+
+  // check_ui's extra checks for 3D: GLSL per pass, a Scene read again later in its animation, asset files.
+  it("has Scene and Shader examples check_ui passes", async () => {
+    const names = (await listGallery()).filter((name) => /^(Scene|Shader)[.-]/.test(name));
+    expect(names.length).toBeGreaterThanOrEqual(8);
+    for (const name of names) {
+      const { ok, report } = await checkSpec(await readGallerySpec(name), (request) => loadGalleryFile(request.path, request));
+      expect(ok ? "" : report, name).toBe("");
     }
   });
 });

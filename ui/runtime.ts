@@ -12,6 +12,11 @@ export type ImageUrl =
 /** A text file read for a component, or a user-facing reason it couldn't be. */
 export type TextFile = { readonly ok: true; readonly text: string } | { readonly ok: false; readonly error: string };
 
+/** A binary file read for a component (a Scene's model, environment or texture), or a user-facing reason it couldn't be. */
+export type AssetBytes =
+  | { readonly ok: true; readonly bytes: ArrayBuffer; readonly type: string }
+  | { readonly ok: false; readonly error: string };
+
 /** What rendered components may do to their UI: local state, actions, files. */
 export interface UiRuntime {
   setValue(name: string, value: Value): void;
@@ -39,6 +44,12 @@ export interface UiRuntime {
    * <audio> can play. Null where the surface can't load files. Never rejects.
    */
   loadAudio: ((src: string) => Promise<ImageUrl>) | null;
+  /**
+   * Reads a file a Scene names (glb, gltf, hdr, png, jpg or webp; 10 MB cap;
+   * the gallery's own files in the gallery) as bytes and our MIME type for
+   * it. Null where the surface can't load files. Never rejects.
+   */
+  loadAsset: ((src: string) => Promise<AssetBytes>) | null;
   /**
    * The message the user sent from this block (a Send action or a Form),
    * persisted per block; null until then. Choice controls collapse to it.

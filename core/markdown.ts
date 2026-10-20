@@ -129,6 +129,7 @@ import {
   type Evidence as ProvenanceEvidence,
   type Fact as ProvenanceFact,
 } from "./provenance";
+import { readScene, type Shape } from "./scene";
 import type { UiNode, Value } from "./types";
 
 const TONE_DOTS: Record<string, string> = { good: "🟢", warn: "🟠", bad: "🔴", info: "🔵", neutral: "⚪" };
@@ -879,11 +880,34 @@ function block(node: UiNode): string {
       return acceptanceMarkdown(props.criteria, props.columns);
     case "Transcript":
       return transcriptMarkdown(props.tracks, inline(props.audio).trim());
+    case "Scene":
+      return sceneMarkdown(props.objects);
+    case "Shader": {
+      const passes = 1 + list(props.buffers).length;
+      return `_GPU shader (${passes} pass${passes === 1 ? "" : "es"}). Open this reply in BB to see it._`;
+    }
     case "Error":
       return `_(error: ${inline(props.message)})_`;
     case "Loading":
       return `_(loading ${inline(props.path)})_`;
   }
+}
+
+const SHAPE_PLURALS: Record<Shape, string> = {
+  box: "boxes", sphere: "spheres", cylinder: "cylinders", surface: "surfaces", mesh: "meshes", line: "lines", path: "paths",
+  point: "points", label: "labels", grid: "grids", axes: "axes", model: "models", environment: "environments", sprite: "sprites",
+};
+
+/** "_3D scene: 3 spheres, 1 surface. …_": what the scene holds at t = 0, by shape in first-seen order. */
+function sceneMarkdown(objects: Value | undefined): string {
+  const counts = new Map<Shape, number>();
+  for (const object of readScene(objects ?? null, 0).objects) {
+    // Lighting and the floor aren't things a reader would count.
+    if (object.shape === "environment" || object.shape === "grid" || object.shape === "axes") continue;
+    counts.set(object.shape, (counts.get(object.shape) ?? 0) + 1);
+  }
+  const parts = [...counts].map(([shape, count]) => `${count} ${count === 1 ? shape : SHAPE_PLURALS[shape]}`);
+  return `_3D scene${parts.length === 0 ? "" : `: ${parts.join(", ")}`}. Open this reply in BB to turn it._`;
 }
 
 /** EditableTable columns: keys or `{key, label?}`; a bare key is its own label, capitalized. */

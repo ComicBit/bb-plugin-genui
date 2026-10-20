@@ -324,7 +324,7 @@ function check(root: unknown): string | null {
       }
       for (const item of value) pending.push(item);
     } else if (typeof value === "object" && value !== null) {
-      if ("kind" in value && (value.kind === "node" || value.kind === "action" || value.kind === "binding")) {
+      if ("kind" in value && (value.kind === "node" || value.kind === "action" || value.kind === "binding" || value.kind === "function")) {
         return `\`kind: "${value.kind}"\` is reserved; loaded data cannot use it`;
       }
       for (const item of Object.values(value)) pending.push(item);

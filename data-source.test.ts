@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
-import { loadThreadAudio, loadThreadFile, loadThreadImage, MAX_AUDIO_BYTES, MAX_DATA_BYTES, MAX_IMAGE_BYTES } from "./data-source";
+import { readFileSync } from "node:fs";
+import { loadGalleryAsset, loadThreadAudio, loadThreadFile, loadThreadImage, MAX_AUDIO_BYTES, MAX_DATA_BYTES, MAX_IMAGE_BYTES } from "./data-source";
 
 const WORKSPACE = "/work/repo";
 const STORAGE = "/home/u/.bb/thread-storage/thr_1";
@@ -195,5 +196,14 @@ describe("loadThreadAudio", () => {
     const before = reads.length;
     expect(await loadThreadAudio(bb, "thr_1", "clip.png")).toMatchObject({ ok: false, error: expect.stringContaining("wav") });
     expect(reads.length).toBe(before);
+  });
+});
+
+describe("loadGalleryAsset", () => {
+  it("returns a model's and an environment's bytes unchanged", async () => {
+    for (const [file, type] of [["3d/pawn.glb", "model/gltf-binary"], ["3d/studio.hdr", "image/vnd.radiance"]]) {
+      const loaded = await loadGalleryAsset(file);
+      expect(loaded).toEqual({ ok: true, dataUrl: `data:${type};base64,${readFileSync(`gallery/${file}`).toString("base64")}` });
+    }
   });
 });
