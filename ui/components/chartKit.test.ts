@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { PALETTE, readSeries, TONE_STROKE } from "./chartKit";
 

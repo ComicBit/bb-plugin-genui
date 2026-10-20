@@ -43,14 +43,22 @@ The internals behind [the README](../README.md): how agents learn the language, 
    - `ui_examples` is optional: it returns the gallery examples of the
      components named (`examples.ts`), with their data files.
 3. Rendering depends on the BB version:
-   - With BB's proposed `experimental_codeFenceRenderer` slot (feature
-     request get-bb/bb#5268, prototype on ComicBit/bb branch
-     `feat/code-fence-renderer`), BB hands each fence to `ui/SlotFence.tsx`
-     together with its closing-fence state and its index.
+   - With BB's merged `experimental_codeFenceRenderer` slot (#5387), BB
+     hands each fence to `ui/SlotFence.tsx` with `code`, `language`,
+     `status: "streaming" | "closed" | "unclosed"`, a per-language index
+     and its message identity. Closed means the delimiter arrived; unclosed
+     means the reply ended without it. UI finalizes diagnostics for either
+     terminal status. Unclosed apps render `Original`, never partial HTML.
+     BB keeps the renderer instance through streaming, closure and reply
+     completion. Missing, disabled, conflicting or crashing renderers fall
+     back to BB's code block; a crash is retried when code or status changes.
+     The local contract mirrors SDK 0.6.40 until npm publishes a version
+     declaring it; then the SDK types replace the mirror and registration cast.
    - On a BB without that slot, an app overlay (`ui/FenceOverlay.tsx`) finds
      the code blocks in BB's DOM, hides them and portals the same `Fence`
-     there. It treats a block as complete once the block's text stops
-     changing. Each mount carries `data-bb-plugin`, so BB's scoped plugin
+     there. It treats a block as complete after 1.5 seconds without a text
+     change, so a paused or interrupted app can execute on this legacy path.
+     Each mount carries `data-bb-plugin`, so BB's scoped plugin
      CSS applies.
    - BB's timeline unmounts rows that scroll out of view and remounts them
      on the way back, so a block must open at its final height or the
@@ -66,12 +74,19 @@ The internals behind [the README](../README.md): how agents learn the language, 
      arrives; a component waiting for a `Load` is a quiet placeholder, never
      an error line. Height glides (`useSmoothHeight`) only follow the
      user's own input; anything else snaps. `scripts/scroll-jitter.mjs`
-     measures it.
+     measures it. Both paths mark mounts with `data-genui-fence` and
+     `data-genui-renderer="slot" | "overlay"`; the script reports mount
+     counts and hidden code blocks as well as drift. Only the overlay adds
+     `data-genui-hidden`. Persistent keys remain
+     `bb.genui.state:${message.id}#${language}#${index}` on either path.
 4. ```ui specs render while the reply streams: `compileStreaming` renders
-   the longest prefix that compiles. ```app blocks run only once complete,
-   in an `<iframe sandbox="allow-scripts">`. The iframe has an opaque
-   origin, a no-network CSP and BB's theme variables, and it sizes itself to
-   its content.
+   the longest prefix that compiles. On the slot path, ```app blocks run
+   only after the closing delimiter; the overlay uses the settlement
+   heuristic above. Apps run in an `<iframe sandbox="allow-scripts">`
+   with an opaque origin, a no-network CSP and BB's theme variables, and
+   size themselves to their content. BB's streaming-tail move preserves
+   iframe documents where `Element.moveBefore` exists; elsewhere an iframe
+   can reload once during settlement even though React state survives.
 5. Interactions re-evaluate the spec locally, with no model call. State
    persists per block in `localStorage`. `Send(text)`, and a Button with no
    action, post a user message through the thread's composer.
@@ -268,8 +283,8 @@ pilot stored.
   node and list limits), and `compileStreaming`. It is pure TypeScript.
 - `ui/`:
   - `Fence.tsx`: the shared renderer.
-  - `SlotFence.tsx` and `FenceOverlay.tsx`: the two ways the renderer gets
-    mounted.
+  - `SlotFence.tsx`: the native renderer slot, including terminal status policy.
+  - `FenceOverlay.tsx`: the older-BB DOM fallback and settlement heuristic.
   - `AppBlock.tsx`: the sandboxed apps.
   - `components/`: one renderer per catalog component. Styling uses host
     token classes only.

@@ -14,7 +14,7 @@ import { GalleryPanel } from "./ui/GalleryPanel";
 import { UiDirective } from "./ui/UiDirective";
 
 export default definePluginApp((app) => {
-  // The slot is not in the published SDK yet, so look for it at runtime.
+  // SDK 0.6.40 declares this slot but is not published yet. Older BB uses the overlay.
   const slots: typeof app.slots & {
     experimental_codeFenceRenderer?: (registration: CodeFenceRendererRegistration) => void;
   } = app.slots;

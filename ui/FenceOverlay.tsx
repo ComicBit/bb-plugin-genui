@@ -65,6 +65,7 @@ function scan(
     const known = previous.get(key);
     const mount = known?.mount ?? document.createElement("div");
     mount.setAttribute(MOUNT_ATTRIBUTE, "");
+    mount.setAttribute("data-genui-renderer", "overlay");
     // BB scopes plugin CSS to `[data-bb-plugin=<id>]` subtrees; a portal into
     // BB's own DOM is outside every plugin root unless it declares one.
     mount.setAttribute("data-bb-plugin", pluginId);

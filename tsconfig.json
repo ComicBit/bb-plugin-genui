@@ -28,6 +28,8 @@
     "app.tsx",
     "instructions.ts",
     "*.test.ts",
+    "vitest.config.ts",
+    "test-setup.ts",
     "core",
     "ui",
     "components",

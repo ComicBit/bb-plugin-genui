@@ -112,7 +112,9 @@ bb genui ask "Plan a two-day trip to Lisbon"
 
 ## How it fits into BB
 
-BB doesn't yet let a plugin render code blocks in a reply, so the plugin finds the `ui` and `app` blocks in BB's page and draws the component in place of each one. A BB update that changes how replies are laid out can turn the UIs back into code blocks until the plugin catches up; the reply itself never loses anything. [get-bb/bb#5268](https://github.com/get-bb/bb/issues/5268) proposes a plugin slot for this, and the plugin switches to it on its own if BB adds it.
+On BB versions with `experimental_codeFenceRenderer` (merged in [get-bb/bb#5387](https://github.com/get-bb/bb/pull/5387)), BB hands `ui` and `app` fences directly to the plugin. UI renders while streaming and shows final diagnostics when the fence closes or the reply ends. Apps start only when their fence closes; an interrupted, unclosed app remains readable source. BB preserves the renderer instance throughout streaming and falls back to its code block if a language has conflicting plugins or a renderer crashes.
+
+BB 0.45 and other versions without the slot still use the DOM overlay. That fallback considers a block complete after its text stops changing for 1.5 seconds: it cannot distinguish a closed fence from a pause or interruption. Changes to BB's page layout can turn those UIs back into code until the plugin catches up. State keys stay the same across the two rendering paths.
 
 The full picture, from the instructions agents receive to how blocks stay steady while BB recycles rows as you scroll, is in [docs/architecture.md](docs/architecture.md).
 

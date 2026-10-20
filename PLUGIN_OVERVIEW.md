@@ -18,6 +18,6 @@ Once the plugin is on, agents in the threads you read learn the components and p
 - About 4,000 tokens of instructions in each session whose replies you read. Worker threads that agents spawn get none.
 - Web lookups, on by default and switchable in the plugin's settings: photo search on Wikimedia Commons, place names through Photon and map tiles from OpenStreetMap. These services see your IP address and what is looked up.
 - Components read files only from the thread's workspace, its thread storage and /tmp.
-- BB has no plugin slot for code blocks yet, so the plugin draws over BB's own. A BB update can show the blocks as code until the plugin catches up.
+- Uses BB's experimental code-fence renderer slot where available. Older BB versions use a DOM overlay with a 1.5-second settlement heuristic; changes to BB's page layout can show those blocks as code until the plugin catches up. On the slot path, sandboxed apps run only after their fence closes.
 
 Source and documentation: https://github.com/ComicBit/bb-plugin-genui

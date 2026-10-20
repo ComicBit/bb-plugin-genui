@@ -54,7 +54,8 @@ await page.addInitScript(() => {
       const sources = (entry.sources ?? []).map((source) => {
         const node = source.node;
         if (!node?.closest) return "?";
-        return `${node.closest("[data-genui-fence]") ? "GENUI " : ""}${node.tagName}.${String(node.className?.baseVal ?? node.className ?? "").slice(0, 30)}`;
+        const mount = node.closest("[data-genui-fence]");
+        return `${mount ? `GENUI(${mount.getAttribute("data-genui-renderer") ?? "unknown"}) ` : ""}${node.tagName}.${String(node.className?.baseVal ?? node.className ?? "").slice(0, 30)}`;
       });
       window.__jitter.shifts.push({ t: entry.startTime, value: entry.value, sources: sources.join(" | ") });
     }
@@ -68,7 +69,8 @@ await page.addInitScript(() => {
       last.set(element, height);
       if (from === undefined || from === 0 || height === 0 || Math.abs(height - from) < 2) continue;
       const row = element.closest("[data-timeline-row-id]")?.getAttribute("data-timeline-row-id") ?? "";
-      window.__jitter.sizes.push({ t: performance.now(), kind: element.hasAttribute("data-genui-fence") ? "genui" : "row", from, height, row: row.slice(-28) });
+      const renderer = element.getAttribute("data-genui-renderer");
+      window.__jitter.sizes.push({ t: performance.now(), kind: element.hasAttribute("data-genui-fence") ? "genui" : "row", renderer, from, height, row: row.slice(-28) });
     }
   });
   new MutationObserver(() => {
@@ -126,6 +128,11 @@ const summary = {
   thread,
   off,
   steps: results.length,
+  mounts: await page.evaluate(() => ({
+    slot: document.querySelectorAll('[data-genui-renderer="slot"]').length,
+    overlay: document.querySelectorAll('[data-genui-renderer="overlay"]').length,
+    hidden: document.querySelectorAll("[data-genui-hidden]").length,
+  })),
   stepsWithDrift: results.filter((result) => result.drift > 2).length,
   totalDriftPx: results.reduce((sum, result) => sum + result.drift, 0),
   maxDriftPx: Math.max(0, ...results.map((result) => result.drift)),
