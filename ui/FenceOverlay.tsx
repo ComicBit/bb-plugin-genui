@@ -27,6 +27,8 @@ interface FenceBlock {
   threadId: string;
   /** The assistant reply's timeline row id, which is also its BB message id. */
   messageId: string;
+  /** Its index among the message's blocks of its language. */
+  index: number;
   code: string;
   mount: HTMLElement;
 }
@@ -83,6 +85,7 @@ function scan(
       language,
       threadId: rowId.slice(0, rowId.indexOf(":")),
       messageId: rowId,
+      index,
       code: text,
       mount,
     });
@@ -177,6 +180,7 @@ function SettlingFence({ block, actions }: { block: FenceBlock; actions: ThreadA
       stateKey={`bb.genui.state:${block.key}`}
       threadId={block.threadId}
       messageId={block.messageId}
+      fence={block.index}
       actions={actions}
     />
   );

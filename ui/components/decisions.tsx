@@ -1,9 +1,9 @@
 // The Decisions components: a Plan the user approves in one tap, a weighted
 // Decision matrix and a three-point Estimate. The maths and the messages live
 // in core/decisions.ts (shared with the markdown fallback); this file draws
-// them and keeps what the user changes (checks, note, weights, edited numbers)
+// them and keeps what the user changes (checks, weights, edited numbers)
 // with usePersistedState, so it survives BB remounting the row.
-import { useId, useState, type ReactNode } from "react";
+import { useContext, useEffect, useId, useState, type ReactNode } from "react";
 import { Markdown } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
 import { Button as BaseButton } from "@/components/ui/button";
@@ -40,12 +40,12 @@ import {
   type TaskEstimate,
 } from "../../core/decisions";
 import type { Value } from "../../core/types";
-import { useUiRuntime } from "../runtime";
+import { NodeKeyContext, questionClosed, sentFor, useAnswers, useUiRuntime } from "../runtime";
 import { propsKey, usePersistedState } from "../usePersistedState";
-import { formatNumber, optionalText, TONE_PILL, type Props, type Tone } from "../values";
+import { formatNumber, TONE_PILL, type Props, type Tone } from "../values";
 import { niceScale } from "./chartMath";
 import { CheckMark, ErrorLine } from "./display";
-import { Button, ButtonGroup, CAPTION, FIELD, FOCUS_RING, SentLine } from "./inputs";
+import { Button, ButtonGroup, CAPTION, FIELD, FOCUS_RING, InMessageLine, SentLine } from "./inputs";
 import { RISE, useEntrance } from "./motion";
 import { ICON_BUTTON, Panel, QuietLine, ShowAll } from "./projectKit";
 
@@ -133,16 +133,16 @@ function CheckBox({ checked, disabled, label, onToggle }: { checked: boolean; di
 interface PlanState {
   /** Checks the user changed, by step index; the rest follow `optional`. */
   readonly toggled: Readonly<Record<string, boolean>>;
-  readonly note: string;
 }
 
-const PLAN_INITIAL: PlanState = { toggled: {}, note: "" };
+const PLAN_INITIAL: PlanState = { toggled: {} };
 
+/** Also reads states kept with the note field a Plan once had. */
 function acceptPlanState(stored: unknown): PlanState | null {
-  if (typeof stored !== "object" || stored === null || !("toggled" in stored) || !("note" in stored)) return null;
-  const { toggled, note } = stored;
-  if (typeof note !== "string" || typeof toggled !== "object" || toggled === null || Array.isArray(toggled)) return null;
-  return Object.values(toggled).every((value) => typeof value === "boolean") ? { toggled: toggled as Record<string, boolean>, note } : null;
+  if (typeof stored !== "object" || stored === null || !("toggled" in stored)) return null;
+  const { toggled } = stored;
+  if (typeof toggled !== "object" || toggled === null || Array.isArray(toggled)) return null;
+  return Object.values(toggled).every((value) => typeof value === "boolean") ? { toggled: toggled as Record<string, boolean> } : null;
 }
 
 function PlanRow({
@@ -213,25 +213,36 @@ function PlanRow({
 }
 
 /**
- * The agent's plan, approved in one tap: numbered steps with a checkbox each
- * (optional ones start unchecked), their files, risks and estimates, a note
- * field, and one button that sends the composed message. Once sent (or the
- * thread moved on) the steps stay read-only and the footer is what was sent.
+ * The agent's plan, and one question: numbered steps with a checkbox each
+ * (optional ones start unchecked), their files, risks and estimates, and an
+ * Approve toggle that stages the approval (the steps kept and skipped) in
+ * the user's message. Changing the steps after approving updates it; changes
+ * in their own words go in the composer. Once sent (or the thread moved on)
+ * the steps stay read-only and the footer is what was sent.
  */
 export function Plan({ props }: { props: Props }) {
-  const { run, answer, superseded } = useUiRuntime();
-  const noteId = useId();
+  const { superseded } = useUiRuntime();
+  const { staged, sent, target, stage } = useAnswers();
+  const question = useContext(NodeKeyContext);
   const read = readPlan(props.steps);
   const [state, setState] = usePersistedState(`${propsKey(props.steps ?? null)}:plan`, PLAN_INITIAL, acceptPlanState);
   const [sending, setSending] = useState(false);
   const [showAll, setShowAll] = useState(false);
-  if (read.error !== null) return <ErrorLine message={read.error} />;
-  const steps = read.steps;
-  if (steps.length === 0) return <QuietLine icon="ListTodo">No steps in this plan yet.</QuietLine>;
+  const steps = read.error === null ? read.steps : [];
   const checked = steps.map((step, index) => state.toggled[String(index)] ?? !step.optional);
-  const message = planMessage(steps, checked, state.note);
-  const frozen = sending || answer !== null || superseded;
-  const label = optionalText(props.submit)?.trim() || "Approve plan";
+  const message = planMessage(steps, checked);
+  const entry = staged.get(question);
+  const closed = questionClosed(sent, question, superseded);
+  // Approved, then the steps changed: the approval follows them (none left: nothing to approve).
+  useEffect(() => {
+    if (closed || entry === undefined || entry.text === message) return;
+    void stage(question, message === "" ? null : { text: message, selection: true });
+  }, [closed, entry, message, question, stage]);
+  if (read.error !== null) return <ErrorLine message={read.error} />;
+  if (steps.length === 0) return <QuietLine icon="ListTodo">No steps in this plan yet.</QuietLine>;
+  const answered = sentFor(sent, question);
+  const approved = entry !== undefined;
+  const frozen = sending || closed;
   const selected = planTotal(steps, checked);
   const all = planTotal(steps, steps.map(() => true));
   const kept = checked.filter(Boolean).length;
@@ -244,7 +255,7 @@ export function Plan({ props }: { props: Props }) {
       // Back at its default, the step follows the spec again.
       if (next === !steps[index].optional) delete toggled[String(index)];
       else toggled[String(index)] = next;
-      return { ...previous, toggled };
+      return { toggled };
     });
   const totalText =
     selected.total === null
@@ -252,13 +263,10 @@ export function Plan({ props }: { props: Props }) {
       : all.total !== null && kept < steps.length && formatQuantity(all.total) !== formatQuantity(selected.total)
         ? `${formatQuantity(selected.total)} of ${formatQuantity(all.total)}`
         : formatQuantity(selected.total);
-  const send = async () => {
+  const approve = async () => {
     setSending(true);
-    try {
-      await run([{ kind: "action", type: "send", text: message }]);
-    } finally {
-      setSending(false);
-    }
+    await stage(question, approved ? null : { text: message, selection: true });
+    setSending(false);
   };
   return (
     <Panel
@@ -288,47 +296,33 @@ export function Plan({ props }: { props: Props }) {
         ))}
       </ol>
       {shown.length < steps.length ? <ShowAll count={steps.length} noun="steps" onClick={() => setShowAll(true)} /> : null}
-      {answer !== null ? (
+      {answered !== null ? (
         // The whole message, wrapped: it is the plan the agent will follow.
         <div className="border-t border-border px-3 py-2.5 [&_.truncate]:whitespace-normal [&_p]:items-start [&_svg]:mt-1">
-          <SentLine text={answer === message ? message : null} />
+          <SentLine text={answered.question !== null || answered.text === message ? answered.text : null} />
         </div>
-      ) : superseded ? null : (
-        <div className="flex min-w-0 flex-col gap-2 border-t border-border px-3 py-3">
-          <label htmlFor={noteId} className={CAPTION}>
-            Anything to change?
-          </label>
-          <input
-            id={noteId}
-            type="text"
-            value={state.note}
-            maxLength={1000}
-            disabled={frozen}
-            placeholder="Optional note for the agent"
-            onChange={(event) => {
-              const note = event.currentTarget.value;
-              setState((previous) => ({ ...previous, note }));
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.nativeEvent.isComposing && !frozen && message !== "") void send();
-            }}
-            className={cn(FIELD, "px-2.5 placeholder:text-muted-foreground/70")}
-          />
-          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 pt-1">
-            <BaseButton
-              type="button"
-              size="sm"
-              disabled={frozen || message === ""}
-              aria-busy={sending || undefined}
-              onClick={() => void send()}
-              className="w-fit max-w-full text-[13px]"
-            >
-              <span className="truncate">{label}</span>
-            </BaseButton>
+      ) : closed ? null : (
+        <div data-genui-question={question} className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border px-3 py-3">
+          <BaseButton
+            type="button"
+            size="sm"
+            variant={approved ? "outline" : "default"}
+            disabled={sending || message === ""}
+            aria-busy={sending || undefined}
+            aria-pressed={target === "direct" ? undefined : approved}
+            onClick={() => void approve()}
+            className={cn("w-fit max-w-full gap-1.5 text-[13px]", approved && "border-transparent bg-surface-recessed text-foreground ring-2 ring-[var(--color-timeline-accent,var(--primary))] ring-offset-1 ring-offset-background")}
+          >
+            {approved ? <Icon name="Check" aria-hidden className="size-3.5 shrink-0" /> : null}
+            <span className="truncate">Approve</span>
+          </BaseButton>
+          {approved ? (
+            <InMessageLine />
+          ) : (
             <span aria-live="polite" className="min-w-0 flex-1 basis-56 text-xs leading-4 text-muted-foreground [overflow-wrap:anywhere]">
-              {message === "" ? "Check a step or write a note to send." : <>Sends “{message}”</>}
+              {message === "" ? "Check a step to approve." : message}
             </span>
-          </div>
+          )}
         </div>
       )}
     </Panel>
@@ -451,11 +445,15 @@ function Verdict({ model, ranked }: { model: DecisionModel; ranked: readonly Ran
 /**
  * A weighted decision matrix: scores tinted by value, a weight stepper per
  * criterion (persisted), live weighted totals and the ranking, pros and cons
- * on demand, and one "Go with" button per option. Below 32rem of width the
- * matrix becomes one card per option, best first.
+ * on demand, and one "Go with" choice per option: a single-select group
+ * whose pick (with the user's weights, which it follows) goes into their
+ * message. Below 32rem of width the matrix becomes one card per option,
+ * best first.
  */
 export function Decision({ props }: { props: Props }) {
-  const { answer, superseded } = useUiRuntime();
+  const { superseded } = useUiRuntime();
+  const { sent } = useAnswers();
+  const question = useContext(NodeKeyContext);
   const read = readDecision(props.options, props.criteria);
   const criteriaCount = read.ok ? read.model.criteria.length : 0;
   const initial = read.ok ? read.model.criteria.map((criterion) => criterion.weight) : [];
@@ -477,7 +475,7 @@ export function Decision({ props }: { props: Props }) {
   const rankOf = new Map(ranked.map((entry, position) => [entry.index, position]));
   const leader = ranked[0].index;
   const tiedLead = (leaderMargin(ranked)?.tied.length ?? 0) > 0;
-  const frozen = answer !== null || superseded;
+  const frozen = questionClosed(sent, question, superseded);
   const changed = current.some((weight, index) => weight !== initial[index]);
   const hasDetails = model.options.some((option) => option.pros.length > 0 || option.cons.length > 0 || option.note !== null);
   const setWeight = (index: number, weight: number) =>
@@ -664,7 +662,7 @@ export function Decision({ props }: { props: Props }) {
             {issue}
           </QuietLine>
         ))}
-        <ButtonGroup buttons={buttons} />
+        <ButtonGroup buttons={buttons} question={question} />
       </div>
     </Panel>
   );

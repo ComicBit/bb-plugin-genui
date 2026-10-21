@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { describe, expect, it } from "vitest";
 import { CACHE_MIGRATIONS, WebCache } from "./cache";
-import { pickImage } from "./commons";
+import { findWikiPhoto, pickImage } from "./commons";
 import { pickLocation } from "./geocode";
 import { declaresImage, sniffImage } from "./image";
 
@@ -100,6 +100,134 @@ describe("pickLocation", () => {
     expect(pickLocation({ features: [] })).toBeNull();
     expect(pickLocation({ features: [{ geometry: { coordinates: [200, 10] } }] })).toBeNull();
     expect(pickLocation("nope")).toBeNull();
+  });
+});
+
+describe("findWikiPhoto", () => {
+  const FILE = "Torre_Bel%C3%A9m_April_2009-4a.jpg";
+  const ORIGINAL = `https://upload.wikimedia.org/wikipedia/commons/6/65/${FILE}`;
+  const rendition = (width: number, file = FILE) => `https://thumb.wikimedia.org/wikipedia/commons/thumb/6/65/${file}/${width}px-${file}`;
+
+  function summary(fields: Record<string, unknown> = {}) {
+    return {
+      type: "standard",
+      title: "Belém Tower",
+      thumbnail: { source: `${rendition(330)}?utm_source=en.wikipedia.org`, width: 330, height: 315 },
+      originalimage: { source: rendition(3840), width: 5035, height: 4805 },
+      content_urls: { desktop: { page: "https://en.wikipedia.org/wiki/Bel%C3%A9m_Tower" } },
+      ...fields,
+    };
+  }
+
+  function fileInfo(fields: { artist?: string | null; license?: string; url?: string; thumburl?: string } = {}) {
+    const extmetadata: Record<string, { value: string }> = {
+      LicenseShortName: { value: fields.license ?? "CC BY-SA 3.0" },
+      LicenseUrl: { value: "https://creativecommons.org/licenses/by-sa/3.0" },
+    };
+    if (fields.artist !== null) extmetadata.Artist = { value: fields.artist ?? '<a href="//commons.wikimedia.org/wiki/User:Alvesgaspar">Alvesgaspar</a>' };
+    return {
+      query: {
+        pages: [
+          {
+            title: "File:Torre Belém April 2009-4a.jpg",
+            imageinfo: [
+              {
+                mime: "image/jpeg",
+                width: 5035,
+                height: 4805,
+                url: fields.url ?? `${ORIGINAL}?utm_source=commons.wikimedia.org`,
+                thumburl: fields.thumburl ?? `${rendition(500)}?utm_campaign=imageinfo`,
+                thumbwidth: 500,
+                thumbheight: 477,
+                descriptionurl: `https://commons.wikimedia.org/wiki/File:${FILE}`,
+                extmetadata,
+              },
+            ],
+          },
+        ],
+      },
+    };
+  }
+
+  /** A fake network: Wikipedia answers `page` (404 for a missing article), Commons answers `file`. */
+  function web(page: unknown, file: unknown = fileInfo()) {
+    const asked: string[] = [];
+    const get = async (url: string) => {
+      asked.push(url);
+      const answer = url.startsWith("https://en.wikipedia.org/") ? page : file;
+      if (typeof answer === "number") return { ok: false as const, error: `the server answered ${answer}`, status: answer };
+      return { ok: true as const, status: 200 as const, url, headers: {}, body: Buffer.from(JSON.stringify(answer)) };
+    };
+    return { get, asked };
+  }
+
+  it("returns the article's lead photo with its author, licence, file page and article", async () => {
+    const { get, asked } = web(summary());
+    expect(await findWikiPhoto("Belém Tower", get)).toEqual({
+      ok: true,
+      photo: {
+        url: rendition(500),
+        width: 500,
+        height: 477,
+        title: "Torre Belém April 2009-4a",
+        creator: "Alvesgaspar",
+        license: "CC BY-SA 3.0",
+        licenseUrl: "https://creativecommons.org/licenses/by-sa/3.0",
+        sourceUrl: `https://commons.wikimedia.org/wiki/File:${FILE}`,
+        articleUrl: "https://en.wikipedia.org/wiki/Bel%C3%A9m_Tower",
+      },
+    });
+    expect(asked[0]).toBe("https://en.wikipedia.org/api/rest_v1/page/summary/Bel%C3%A9m_Tower");
+    expect(new URL(asked[1]).searchParams.get("titles")).toBe("File:Torre_Belém_April_2009-4a.jpg");
+  });
+
+  it("accepts public domain photos", async () => {
+    const { get } = web(summary(), fileInfo({ license: "Public domain" }));
+    expect(await findWikiPhoto("Belém Tower", get)).toMatchObject({ ok: true, photo: { license: "Public domain" } });
+  });
+
+  it("shows no photo without a named author", async () => {
+    for (const artist of [null, "  ", "<span></span>"]) {
+      const { get } = web(summary(), fileInfo({ artist }));
+      expect(await findWikiPhoto("Belém Tower", get), String(artist)).toEqual({ ok: true, photo: null });
+    }
+  });
+
+  it("shows no photo under a licence that isn't Creative Commons or public domain", async () => {
+    for (const license of ["GFDL", "Fair use", "Copyrighted", ""]) {
+      const { get } = web(summary(), fileInfo({ license }));
+      expect(await findWikiPhoto("Belém Tower", get), license).toEqual({ ok: true, photo: null });
+    }
+  });
+
+  it("shows no photo from outside Wikimedia Commons, and doesn't ask Commons about it", async () => {
+    const local = "https://upload.wikimedia.org/wikipedia/en/6/65/Poster.jpg";
+    for (const source of [local, `https://example.com/wikipedia/commons/6/65/${FILE}`, `http://upload.wikimedia.org/wikipedia/commons/6/65/${FILE}`]) {
+      const { get, asked } = web(summary({ thumbnail: { source }, originalimage: { source } }));
+      expect(await findWikiPhoto("Belém Tower", get), source).toEqual({ ok: true, photo: null });
+      expect(asked).toHaveLength(1);
+    }
+    // Commons' own answer must keep the original on upload.wikimedia.org too.
+    const { get } = web(summary(), fileInfo({ url: `https://example.com/wikipedia/commons/6/65/${FILE}` }));
+    expect(await findWikiPhoto("Belém Tower", get)).toEqual({ ok: true, photo: null });
+  });
+
+  it("shows no photo when the thumbnail and the credited file differ", async () => {
+    const other = "Lisbon_skyline.jpg";
+    const { get, asked } = web(summary({ thumbnail: { source: rendition(330, other) } }));
+    expect(await findWikiPhoto("Belém Tower", get)).toEqual({ ok: true, photo: null });
+    expect(asked).toHaveLength(1);
+    for (const answer of [fileInfo({ thumburl: rendition(500, other) }), fileInfo({ url: `https://upload.wikimedia.org/wikipedia/commons/1/1a/${other}` })]) {
+      const commons = web(summary(), answer);
+      expect(await findWikiPhoto("Belém Tower", commons.get)).toEqual({ ok: true, photo: null });
+    }
+  });
+
+  it("takes a missing article or a disambiguation page as no photo, and a server error as a failed lookup", async () => {
+    expect(await findWikiPhoto("Nowhere Tower", web(404).get)).toEqual({ ok: true, photo: null });
+    expect(await findWikiPhoto("Mercury", web(summary({ type: "disambiguation" })).get)).toEqual({ ok: true, photo: null });
+    expect(await findWikiPhoto("Belém Tower", web(503).get)).toEqual({ ok: false, error: "the server answered 503" });
+    expect(await findWikiPhoto("Belém Tower", web(summary(), 500).get)).toEqual({ ok: false, error: "the server answered 500" });
   });
 });
 

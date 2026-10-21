@@ -1,8 +1,9 @@
 // Maps evaluated UiNodes onto the catalog components. Each component reads
 // its props defensively (see values.ts), so a malformed node degrades to an
 // Error line instead of breaking the message.
-import { Component, type ComponentType, type ReactNode } from "react";
+import { Component, useContext, type ComponentType, type ReactNode } from "react";
 import type { ComponentName } from "../core/catalog";
+import { sourceCaption } from "../core/source";
 import type { UiNode } from "../core/types";
 import { Acceptance } from "./components/Acceptance";
 import { CalendarHeatmap } from "./components/CalendarHeatmap";
@@ -35,6 +36,7 @@ import { Pipeline } from "./components/Pipeline";
 import { Provenance } from "./components/Provenance";
 import { PullRequest } from "./components/pullRequest";
 import { Entity, Hotspots, Sources } from "./components/references";
+import { SourceLine } from "./components/source";
 import { Scene } from "./components/Scene";
 import { Shader } from "./components/Shader";
 import { StackTrace } from "./components/StackTrace";
@@ -47,7 +49,24 @@ import { Treemap } from "./components/Treemap";
 import { Waterfall } from "./components/Waterfall";
 import { Gallery, ImageSearch } from "./components/webMedia";
 import { Flashcards, Quiz, Timer } from "./components/widgets";
+import { InTableContext, NodeKeyContext } from "./runtime";
 import { text, type Props } from "./values";
+
+/** Components that need their node key (NodeKeyContext): a lone Button, and those that ask the user something. */
+const KEYED: Partial<Record<ComponentName, true>> = {
+  Button: true,
+  Form: true,
+  Plan: true,
+  Decision: true,
+  FollowUps: true,
+  List: true,
+  Findings: true,
+  Dependencies: true,
+  Pipeline: true,
+};
+
+/** Components with a `source:` caption (also the files their data was Loaded from). */
+const SOURCED: Partial<Record<ComponentName, true>> = { Table: true, Chart: true, Metric: true };
 
 /** One renderer per catalog component; a catalog entry without one fails to typecheck. */
 const RENDERERS = {
@@ -141,12 +160,35 @@ const RENDERERS = {
   Shader,
 } satisfies Record<ComponentName, ComponentType<{ props: Props }>>;
 
-export function RenderNode({ node }: { node: UiNode }): ReactNode {
+/**
+ * `captioned: false` leaves out the source line, for a parent that shows one
+ * for all its children (a stat strip); a component in a table cell never has
+ * one, the table's own says it.
+ */
+export function RenderNode({ node, captioned = true }: { node: UiNode; captioned?: boolean }): ReactNode {
+  const inTable = useContext(InTableContext);
   if (node.type === "Error") return <ErrorLine message={text(node.props.message)} />;
   if (node.type === "Loading") {
     return <LoadingPlaceholder path={text(node.props.path)} component={typeof node.props.component === "string" ? node.props.component : null} />;
   }
   const Renderer: ComponentType<{ props: Props }> = RENDERERS[node.type];
+  if (KEYED[node.type]) {
+    return (
+      <NodeKeyContext value={node.key}>
+        <Renderer props={node.props} />
+      </NodeKeyContext>
+    );
+  }
+  if (SOURCED[node.type]) {
+    // Wrapped with or without a caption, so a `source:` arriving as the reply streams never remounts the component.
+    const caption = captioned && !inTable ? sourceCaption(node.props) : null;
+    return (
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <Renderer props={node.props} />
+        {caption === null ? null : <SourceLine caption={caption} />}
+      </div>
+    );
+  }
   return <Renderer props={node.props} />;
 }
 

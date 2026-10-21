@@ -60,7 +60,10 @@ export interface UiNode {
    * component identity: derived from the source position and list index.
    */
   readonly key: string;
-  /** For `type: "Error"`: `{ message: string }`; for `"Loading"`: `{ path: string, component: ComponentName | null }` (null for a bare expression). */
+  /**
+   * For `type: "Error"`: `{ message: string }`; for `"Loading"`: `{ path: string, component: ComponentName | null }` (null for a bare expression).
+   * A Table, Chart or Metric without `source` whose data came from Load also has `loadedFrom: string[]`, the paths in the order its arguments reach them.
+   */
   readonly props: Readonly<Record<string, Value>>;
 }
 

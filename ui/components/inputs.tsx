@@ -4,7 +4,7 @@ import { Button as BaseButton } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import { resolveIconName } from "../icons";
-import { CardDepthContext, useUiRuntime } from "../runtime";
+import { CardDepthContext, NodeKeyContext, questionClosed, sentFor, useAnswers, useUiRuntime } from "../runtime";
 import {
   finiteNumber,
   formatNumber,
@@ -312,54 +312,67 @@ export function Checklist({ props }: { props: Props }) {
   );
 }
 
-/** True inside a ButtonGroup, which handles the answered and superseded states for its buttons. */
-const ButtonGroupContext = createContext(false);
+/**
+ * A button's part in its ButtonGroup: undefined outside every group; null
+ * for a button that is not an open choice (links, copies, Set, or a closed
+ * question); else whether it is the picked choice and how to toggle it.
+ */
+const ChoiceContext = createContext<{ readonly pressed: boolean; toggle(text: string): void } | null | undefined>(undefined);
 
 /**
  * A Button wherever it appears: inside a ButtonGroup it is a plain button;
  * anywhere else (a Row cell, a Table cell, a Grid tile) it is a group of one,
- * so a choice button still folds away once answered.
+ * so a choice button still toggles and folds away once answered.
  */
 export function Button({ props }: { props: Props }) {
-  const grouped = useContext(ButtonGroupContext);
+  const grouped = useContext(ChoiceContext) !== undefined;
+  const key = useContext(NodeKeyContext);
   if (grouped) return <ButtonView props={props} />;
-  return <ButtonGroup buttons={[{ key: "self", props, element: <ButtonView props={props} /> }]} />;
+  return <ButtonGroup buttons={[{ key, props, element: <ButtonView props={props} /> }]} />;
 }
 
 function ButtonView({ props }: { props: Props }) {
   const { run } = useUiRuntime();
+  const choice = useContext(ChoiceContext);
   // Inside a nested tile, buttons sit on a tinted surface beside siblings that
   // carry the same action: a filled button per tile is too loud.
   const nested = useContext(CardDepthContext) > 1;
   const [running, setRunning] = useState(false);
   const label = text(props.label);
-  // A button without an action is a reply choice: it sends its own label.
-  const actions: readonly Action[] =
-    props.action === undefined
-      ? [{ kind: "action", type: "send", text: label }]
-      : list(props.action).filter(isAction);
+  const actions: readonly Action[] = props.action === undefined ? [] : list(props.action).filter(isAction);
+  const answers = answerTexts(props);
+  // A choice stages its answer; its other actions (a Set beside the Send) run when it is picked.
+  const picks = choice != null && answers.length > 0;
+  const pressed = picks && choice.pressed;
   const filled = props.variant === "primary" && !nested;
   const destructive = props.variant === "destructive";
   // An unknown name draws nothing; links and copies get their glyph by default.
-  const icon =
-    props.icon !== undefined
+  const icon = pressed
+    ? "Check"
+    : props.icon !== undefined
       ? resolveIconName(text(props.icon))
       : actions.some((action) => action.type === "openUrl")
         ? "ExternalLink"
         : actions.some((action) => action.type === "copy")
           ? "Copy"
           : null;
+  const others = actions.filter((action) => action.type !== "send");
   return (
     <BaseButton
       type="button"
       size="sm"
       variant={filled ? "default" : "outline"}
-      disabled={running || actions.length === 0}
+      disabled={running || (!picks && others.length === 0)}
       aria-busy={running || undefined}
+      aria-pressed={picks ? pressed : undefined}
       onClick={async () => {
         setRunning(true);
         try {
-          await run(actions);
+          if (!picks) await run(others);
+          else {
+            if (!pressed && others.length > 0) await run(others);
+            choice.toggle(answers.join("\n"));
+          }
         } finally {
           setRunning(false);
         }
@@ -367,6 +380,8 @@ function ButtonView({ props }: { props: Props }) {
       className={cn(
         "w-fit max-w-full gap-1.5 text-[13px]",
         !filled && "bg-background text-foreground",
+        pressed && "ring-2 ring-[var(--color-timeline-accent,var(--primary))] ring-offset-1 ring-offset-background",
+        pressed && !filled && "border-transparent bg-surface-recessed",
         destructive &&
           "border-destructive/40 text-destructive hover:bg-destructive/8 hover:text-destructive focus-visible:ring-destructive/60",
       )}
@@ -400,19 +415,34 @@ export function SentLine({ text }: { text: string | null }) {
   );
 }
 
+/**
+ * The one cue under a question whose answer is staged: it is in the user's
+ * message, and goes when they send it. In the gallery, where it would go.
+ */
+export function InMessageLine() {
+  const { target } = useAnswers();
+  return (
+    <p role="status" className="m-0 flex min-w-0 items-center gap-1.5 text-xs leading-4 text-muted-foreground">
+      <Icon name="CornerDownRight" aria-hidden className="size-3.5 shrink-0" />
+      {target === "gallery" ? "Would go in your message" : "In your message"}
+    </p>
+  );
+}
+
 const SENT_ENTRANCE: Entrance = { keyframes: [{ opacity: 0 }, { opacity: 1 }], duration: 240 };
 
 /** How long answered choices fade before they leave the layout. */
 const CHOICE_FADE_MS = 200;
 
 /**
- * Whether this UI's choices are closed (it sent an answer, or the thread moved
- * on) and, once their fade has run, gone. Choices closed before they mounted
- * are gone at once; ones closed on screen fade first.
+ * Whether `question` is closed (its answer was sent, or the thread moved on)
+ * and, once its fade has run, gone. Choices closed before they mounted are
+ * gone at once; ones closed on screen fade first.
  */
-export function useClosedChoices(): { closed: boolean; gone: boolean } {
-  const { answer, superseded } = useUiRuntime();
-  const closed = answer !== null || superseded;
+export function useClosedChoices(question: string): { closed: boolean; gone: boolean } {
+  const { superseded } = useUiRuntime();
+  const { sent } = useAnswers();
+  const closed = questionClosed(sent, question, superseded);
   const [gone, setGone] = useState(closed);
   useEffect(() => {
     if (!closed) {
@@ -432,53 +462,76 @@ export interface GroupedButton {
   readonly element: ReactNode;
 }
 
-/** The text a button sends: its Send action's text, or its own label when it has no action. */
-function sentTexts(props: Props): string[] {
+/** A button's answer when picked: its Send actions' texts, or its own label when it has no action. */
+function answerTexts(props: Props): string[] {
   if (props.action === undefined) return [text(props.label)];
   return list(props.action).flatMap((action) => (isAction(action) && action.type === "send" ? [action.text] : []));
 }
 
 /**
- * A run of consecutive Buttons: one wrapping row. Choice buttons (Send, or no
- * action) are the reply's question: once this UI sent an answer they fold
- * into one line showing it, and once the thread moved on without one they
- * leave. Other buttons (links, copies, local state) stay.
+ * A run of consecutive Buttons: one wrapping row, and one question. Its
+ * choice buttons (Send, or no action) are a single-select toggle: a pick
+ * stages its answer in the user's message (useAnswers), picking it again
+ * withdraws it, a sibling switches. Once the answer is sent they fold into
+ * one line showing it, and once the thread moved on without one they leave.
+ * Other buttons (links, copies, local state) run at once and stay.
+ * `question` names it where the buttons' keys are not node keys.
  */
-export function ButtonGroup({ buttons }: { buttons: readonly GroupedButton[] }) {
-  const { answer } = useUiRuntime();
-  const { closed, gone } = useClosedChoices();
-  const choice = buttons.map(({ props }) => props.action === undefined || sentTexts(props).length > 0);
-  // The sent line shows once, beside the button that sent it; other choice
-  // runs (and a Form's answer) just fold away.
-  const sentHere = answer !== null && buttons.some(({ props }) => sentTexts(props).includes(answer));
-  const sent = sentHere && gone;
+export function ButtonGroup({ buttons, question: given }: { buttons: readonly GroupedButton[]; question?: string }) {
+  const { staged, sent, stage } = useAnswers();
+  const question = given ?? `buttons:${buttons[0]?.key ?? ""}`;
+  const texts = buttons.map(({ props }) => answerTexts(props));
+  const choice = texts.map((answers) => answers.length > 0);
+  const { closed, gone } = useClosedChoices(question);
+  const answered = sentFor(sent, question, (answer) => texts.some((answers) => answers.includes(answer)));
+  const entry = staged.get(question);
+  const picked = entry === undefined ? -1 : buttons.findIndex((button) => button.key === entry.selection);
+  const pickedText = picked === -1 ? null : texts[picked].join("\n");
+  // A picked button whose Send reads state that changed since: its answer follows.
+  useEffect(() => {
+    if (closed || entry === undefined || pickedText === null || pickedText === entry.text) return;
+    stage(question, { text: pickedText, selection: entry.selection });
+  }, [closed, entry, pickedText, question, stage]);
+  // The sent line shows beside the question it answered; other runs just fold away.
+  const sentHere = answered !== null && gone;
   const shown = choice.some((isChoice) => !(isChoice && gone));
-  if (!sent && !shown) return null;
+  if (!sentHere && !shown) return null;
   return (
-    <ButtonGroupContext value={true}>
-      <div data-button-group="" className="flex min-w-0 flex-col gap-2">
-        {sent ? <SentLine text={answer} /> : null}
-        {shown ? (
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            {buttons.map((button, index) => {
-              const leaving = choice[index] && closed;
-              if (leaving && gone) return null;
-              return (
-                <div
-                  key={button.key}
-                  inert={leaving}
-                  className={cn(
-                    "flex min-w-0 max-w-full transition-opacity duration-200 ease-out motion-reduce:transition-none",
-                    leaving && "opacity-0",
-                  )}
+    <div data-button-group="" data-genui-question={choice.some(Boolean) ? question : undefined} className="flex min-w-0 flex-col gap-2">
+      {sentHere ? <SentLine text={answered.text} /> : null}
+      {shown ? (
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          {buttons.map((button, index) => {
+            const leaving = choice[index] && closed;
+            if (leaving && gone) return null;
+            const open = choice[index] && !closed;
+            return (
+              <div
+                key={button.key}
+                inert={leaving}
+                className={cn(
+                  "flex min-w-0 max-w-full transition-opacity duration-200 ease-out motion-reduce:transition-none",
+                  leaving && "opacity-0",
+                )}
+              >
+                <ChoiceContext
+                  value={
+                    open
+                      ? {
+                          pressed: index === picked,
+                          toggle: (answer) => stage(question, index === picked ? null : { text: answer, selection: button.key }),
+                        }
+                      : null
+                  }
                 >
                   {button.element}
-                </div>
-              );
-            })}
-          </div>
-        ) : null}
-      </div>
-    </ButtonGroupContext>
+                </ChoiceContext>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+      {entry !== undefined && !closed ? <InMessageLine /> : null}
+    </div>
   );
 }

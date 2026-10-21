@@ -1,11 +1,13 @@
 // Renders a compiled spec and re-evaluates it locally on every state change
 // (no model round trip). Shared by fenced ```ui blocks and stored ::ui UIs;
-// each caller supplies how Send and file links reach its thread.
+// each caller supplies where answers go and how file links reach its thread.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
-import { useBbNavigate, type PluginComposerApi } from "@get-bb/plugin-sdk/app";
-import { collectLoads, dataKey, evaluate, initialState, type LoadedData, type Program } from "../core";
+import { useBbNavigate } from "@get-bb/plugin-sdk/app";
+import { collectLoads, dataKey, evaluate, imageSearches, initialState, toMarkdownWithImages, wikiPhotos, type LoadedData, type Program } from "../core";
+import { answersText } from "../core/answers";
 import type { Action, Diagnostic, Value } from "../core/types";
+import { GALLERY_SHEET, sheetFor, useBlockAnswers, type Selection } from "./answerSheet";
 import {
   DiagnosticList,
   exampleTitle,
@@ -17,25 +19,35 @@ import {
 } from "./FrameFooter";
 import { RenderNodes } from "./render";
 import { useReservedHeight } from "./reservedHeight";
-import { UiRuntimeContext, type UiRuntime } from "./runtime";
+import { AnswersContext, UiRuntimeContext, type Answers, type UiRuntime } from "./runtime";
 import { EntranceContext, newStreamCadence, trackStream, useMotionScope } from "./components/motion";
+import { foundImages, foundWikiPhotos } from "./webLookups";
 
 /** Blocks mounted in this page, so a remount (BB's timeline while scrolling) doesn't replay entrances. */
 const MOUNTED = new Set<string>();
 /** Long enough to cover the remount's first commit, short enough for the user's next action to animate. */
 const REMOUNT_QUIET_MS = 300;
+/** Where a question that is not on screen sorts within its block. */
+const UNPLACED = Number.MAX_SAFE_INTEGER;
 
-/** Posts `text` as the user's next message, or appends it to a draft the user is writing. */
-export async function sendThroughComposer(composer: PluginComposerApi, text: string): Promise<void> {
-  if (composer.isEmpty) {
-    composer.insert(text);
-    await composer.submit({ experimental_data: { source: "genui" } });
-    return;
-  }
-  composer.insert(text, { at: "end", block: true });
-  composer.focus();
-  toast("Added to your draft");
-}
+/**
+ * Where a block's answers go. In a thread they are staged into the thread's
+ * composer (ui/answerSheet.ts), and `send` posts one at once only when the
+ * thread has no composer on screen. The gallery shows what it would stage.
+ */
+export type AnswerTarget =
+  | {
+      readonly kind: "thread";
+      readonly threadId: string;
+      /** The assistant message holding the block. */
+      readonly messageId: string;
+      /** The block's index among the message's ```ui blocks. */
+      readonly fence: number;
+      /** The message's index in the thread, once known (reply order of the answers). */
+      readonly reply: number | null;
+      send(text: string): Promise<void>;
+    }
+  | { readonly kind: "gallery" };
 
 /** Values the user changed earlier for this UI, from localStorage. */
 function readStoredValues(storageKey: string): Record<string, Value> {
@@ -50,22 +62,13 @@ function readStoredValues(storageKey: string): Record<string, Value> {
   }
 }
 
-/** The message the user sent from this UI earlier, from localStorage. */
-function readStoredAnswer(storageKey: string): string | null {
-  try {
-    return localStorage.getItem(storageKey);
-  } catch {
-    return null;
-  }
-}
-
 export function LiveUi({
   program,
   compileDiagnostics,
   source,
   stateKey,
   data,
-  send,
+  answers: target,
   openFile,
   loadImage,
   readText,
@@ -83,7 +86,7 @@ export function LiveUi({
   stateKey: string;
   /** Files the spec reads with Load and Snippet, keyed by `dataKey`. */
   data?: ReadonlyMap<string, LoadedData>;
-  send(text: string): Promise<void>;
+  answers: AnswerTarget;
   openFile: UiRuntime["openFile"];
   loadImage: UiRuntime["loadImage"];
   readText: UiRuntime["readText"];
@@ -126,10 +129,6 @@ export function LiveUi({
     }
   }, [stateKey, changed]);
 
-  // What the user sent from this block; choice controls collapse to it.
-  const answerKey = `${stateKey}:answer`;
-  const [answer, setAnswer] = useState<string | null>(() => readStoredAnswer(answerKey));
-
   const navigate = useBbNavigate();
   const setValue = useCallback(
     (name: string, value: Value) => {
@@ -145,13 +144,7 @@ export function LiveUi({
           setValue(action.name, action.value);
           return;
         case "send":
-          await send(action.text);
-          setAnswer(action.text);
-          try {
-            localStorage.setItem(answerKey, action.text);
-          } catch {
-            // Storage unavailable: the choice collapses until the page reloads.
-          }
+          // An answer: the Button or List row holding it stages it.
           return;
         case "openUrl": {
           let url: URL;
@@ -172,7 +165,7 @@ export function LiveUi({
           return;
       }
     },
-    [navigate, setValue, send, answerKey],
+    [navigate, setValue],
   );
 
   // Pictures still being read: the block keeps its remembered height until they arrive.
@@ -196,7 +189,6 @@ export function LiveUi({
       readText,
       loadAudio,
       loadAsset,
-      answer,
       superseded: superseded === true,
       threadId,
       blockKey,
@@ -208,12 +200,26 @@ export function LiveUi({
         }
       },
     }),
-    [setValue, openFile, loadImage, holdHeight, readText, loadAudio, loadAsset, answer, superseded, threadId, blockKey, runAction],
+    [setValue, openFile, loadImage, holdHeight, readText, loadAudio, loadAsset, superseded, threadId, blockKey, runAction],
   );
+
+  const blockRoot = useRef<HTMLDivElement | null>(null);
+  // A question's place in the block: document order of the controls on screen.
+  const place = useCallback((question: string) => {
+    const placed = [...(blockRoot.current?.querySelectorAll("[data-genui-question]") ?? [])].findIndex(
+      (element) => element.getAttribute("data-genui-question") === question,
+    );
+    return placed === -1 ? UNPLACED : placed;
+  }, []);
+  const answers = useBlockAnswerTarget(target, stateKey, superseded === true, place);
 
   const { roots, diagnostics } = useMemo(() => evaluate(program, state, data), [program, state, data]);
   // Memoized elements let React skip the tree when only a parent re-renders.
   const tree = useMemo(() => <RenderNodes nodes={roots} isolate />, [roots]);
+  // Built only when the user copies: the block as it reads now, with the photos
+  // its searches already found on this page (Project components, which need
+  // BB's answer, name themselves instead).
+  const markdown = useCallback(() => toMarkdownWithImages(roots, foundImages(imageSearches(roots)), foundWikiPhotos(wikiPhotos(roots))), [roots]);
   // The gallery reads files from its own folder, so they're listed under gallery/.
   const inGallery = gallery !== undefined;
   const files = useMemo(
@@ -245,19 +251,88 @@ export function LiveUi({
     trackStream(entrance.stream, streaming, performance.now());
   }
 
+  const preview = answers.target === "gallery" ? answersText([...answers.staged.values()]) : null;
   return (
     <UiRuntimeContext value={runtime}>
-      <EntranceContext value={entrance}>
-        <Frame source={source} diagnostics={[...compileDiagnostics, ...diagnostics]} files={files} gallery={gallery}>
-          {/* Holds the height this block last settled at while what it reads arrives (reservedHeight.ts). */}
-          <div style={minHeight === undefined ? undefined : { minHeight }}>
-            <div ref={content} className="flex flex-col gap-3">
-              {tree}
+      <AnswersContext value={answers}>
+        <EntranceContext value={entrance}>
+          <Frame source={source} diagnostics={[...compileDiagnostics, ...diagnostics]} files={files} gallery={gallery} markdown={markdown}>
+            {/* Holds the height this block last settled at while what it reads arrives (reservedHeight.ts). */}
+            <div ref={blockRoot} style={minHeight === undefined ? undefined : { minHeight }}>
+              <div ref={content} className="flex flex-col gap-3">
+                {tree}
+              </div>
             </div>
-          </div>
-        </Frame>
-      </EntranceContext>
+            {preview === null ? null : <AnswersPreview text={preview} />}
+          </Frame>
+        </EntranceContext>
+      </AnswersContext>
     </UiRuntimeContext>
+  );
+}
+
+/**
+ * A block's questions on its thread's answer sheet (ui/answerSheet.ts),
+ * for ```ui blocks and apps alike: a pick is staged into the composer's
+ * draft, sent at once only when the thread has no composer on screen, and
+ * shown as a preview in the gallery. `position` places a question within
+ * its block.
+ */
+export function useBlockAnswerTarget(
+  target: AnswerTarget,
+  stateKey: string,
+  superseded: boolean,
+  position: (question: string) => number,
+): Answers {
+  const sheet = target.kind === "thread" ? sheetFor(target.threadId) : GALLERY_SHEET;
+  const block = useBlockAnswers(sheet, stateKey);
+  const mode: Answers["target"] = target.kind === "gallery" ? "gallery" : block.composer ? "composer" : "direct";
+  // A later user message after a draft emptied with this block's answers in it: they were sent.
+  useEffect(() => {
+    if (superseded) sheet.supersede(stateKey);
+  }, [superseded, sheet, stateKey, block]);
+  const stage = useCallback(
+    async (question: string, answer: { readonly text: string; readonly selection: Selection } | null) => {
+      if (answer === null) {
+        sheet.withdraw(stateKey, question);
+        return;
+      }
+      if (mode === "direct" && target.kind === "thread") {
+        // No composer for the thread: the pick is the user's message, as before answers were staged.
+        try {
+          await target.send(answer.text);
+          sheet.markSent(stateKey, question, answer.text);
+        } catch (cause) {
+          toast.error(cause instanceof Error ? cause.message : String(cause));
+        }
+        return;
+      }
+      sheet.stage({
+        block: stateKey,
+        question,
+        message: target.kind === "thread" ? target.messageId : stateKey,
+        reply: target.kind === "thread" ? target.reply : null,
+        fence: target.kind === "thread" ? target.fence : 0,
+        position: position(question),
+        text: answer.text,
+        selection: answer.selection,
+      });
+    },
+    [sheet, stateKey, mode, target, position],
+  );
+  return useMemo<Answers>(
+    () => ({ staged: block.staged, sent: block.sent, target: mode, stage }),
+    [block.staged, block.sent, mode, stage],
+  );
+}
+
+/** The gallery's stand-in for the composer: what this example's picks would put in the user's message. */
+function AnswersPreview({ text }: { text: string }) {
+  return (
+    <div role="status" className="mt-3 flex min-w-0 flex-col gap-1 rounded-lg bg-surface-recessed px-3 py-2">
+      <span className="text-xs font-medium leading-4 text-muted-foreground">In a thread, your message would get</span>
+      <p className="m-0 whitespace-pre-wrap text-[13px] leading-5 text-foreground [overflow-wrap:anywhere]">{text}</p>
+    </div>
   );
 }
 
@@ -273,6 +348,7 @@ export function Frame({
   diagnostics,
   files = [],
   gallery,
+  markdown,
   children,
 }: {
   source: string;
@@ -282,6 +358,8 @@ export function Frame({
   files?: readonly SourceFile[];
   /** Set on the gallery page: which example this is. */
   gallery?: GalleryExample;
+  /** A rendered ```ui block's current markdown, for "Copy as markdown"; apps and failures have none. */
+  markdown?: () => string;
   children: ReactNode;
 }) {
   const motion = useMotionScope();
@@ -290,7 +368,7 @@ export function Frame({
   return gallery === undefined ? (
     <div {...motion} data-bb-image-preview-ignore="" className="group/genui not-prose my-3 flex flex-col gap-3">
       {children}
-      <ReplySource source={source} language={language} files={files} diagnostics={diagnostics} />
+      <ReplySource source={source} language={language} files={files} diagnostics={diagnostics} markdown={markdown} />
     </div>
   ) : (
     <div
@@ -301,7 +379,14 @@ export function Frame({
       className="group/genui not-prose my-3 flex flex-col gap-1.5"
     >
       {children}
-      <GalleryFooter example={gallery} source={source} language={language} files={files} diagnostics={diagnostics} />
+      <GalleryFooter
+        example={gallery}
+        source={source}
+        language={language}
+        files={files}
+        diagnostics={diagnostics}
+        markdown={markdown}
+      />
     </div>
   );
 }

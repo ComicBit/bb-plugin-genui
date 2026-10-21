@@ -8,7 +8,7 @@ function markdown(source: string): string {
 }
 
 describe("toMarkdown: decisions", () => {
-  it("renders a Plan as a numbered list with risks, estimates, details, files, the total and the approve label", () => {
+  it("renders a Plan as a numbered list with risks, estimates, details, files, the total and the Approve choice, ignoring a legacy submit label", () => {
     expect(
       markdown(`Plan([
   {title: "Add a limiter", detail: "Token bucket per host", files: ["web/limiter.ts", "web/photon.ts:40"], risk: "low", estimate: "2h"},
@@ -23,12 +23,12 @@ describe("toMarkdown: decisions", () => {
 2. _(optional)_ Migrate the old rows · **high risk** · 1 d
 3. Document it · 30 min
 
-Submit: Start`);
+Options: Approve`);
   });
 
-  it("defaults the submit label and says when there are no steps", () => {
+  it("says when there are no steps", () => {
     expect(markdown(`Plan([])`)).toBe("**Plan** · no steps");
-    expect(markdown(`Plan(["Ship"])`)).toBe("**Plan** · 1 step\n\n1. Ship\n\nSubmit: Approve plan");
+    expect(markdown(`Plan(["Ship"])`)).toBe("**Plan** · 1 step\n\n1. Ship\n\nOptions: Approve");
   });
 
   it("renders a Decision as its verdict, the weighted matrix, pros and cons and the options", () => {

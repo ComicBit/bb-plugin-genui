@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampView, fitView, MAX_ZOOM, MIN_ZOOM, pan, project, toScreen, visibleTiles, zoomAround } from "./mapMath";
+import { clampView, fitView, MAX_ZOOM, MIN_ZOOM, pan, project, toScreen, TOUR_MS, tourStep, visibleTiles, zoomAround } from "./mapMath";
 
 const size = { width: 600, height: 400 };
 const lisbon = project(38.7223, -9.1393);
@@ -90,5 +90,17 @@ describe("visibleTiles", () => {
     expect(tiles.every((tile) => tile.x >= 0 && tile.x < 4 && tile.y >= 0 && tile.y < 4)).toBe(true);
     expect(tiles.some((tile) => tile.x === 3)).toBe(true);
     expect(new Set(tiles.map((tile) => tile.key)).size).toBe(tiles.length);
+  });
+});
+
+describe("tourStep", () => {
+  it("drops the last pin about TOUR_MS after the first for a typical trip", () => {
+    for (const count of [5, 8, 13]) expect((count - 1) * tourStep(count)).toBeCloseTo(TOUR_MS, 0);
+  });
+
+  it("neither crawls for a couple of places nor flickers through many", () => {
+    expect(tourStep(1)).toBe(1500);
+    expect(tourStep(2)).toBe(1500);
+    expect(tourStep(60)).toBe(300);
   });
 });

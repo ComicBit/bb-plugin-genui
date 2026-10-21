@@ -1,7 +1,7 @@
 import type { ArrowExpr, CallExpr, Expr, Program } from "./ast";
 import { CONSTANTS, FORBIDDEN_PROPERTIES, LIMITS, type ComponentName, type ComponentSpec, type ParamSpec } from "./catalog";
 import { DiagnosticList, type Pos } from "./diagnostics";
-import { dataKey, languageOf, snippetLines, snippetRangeError, type LoadedData } from "./data";
+import { dataKey, languageOf, loadsReached, snippetLines, snippetRangeError, type LoadedData } from "./data";
 import { sceneErrors } from "./scene";
 import { shaderErrors } from "./shader-args";
 import type { Action, Binding, Diagnostic, FunctionValue, UiNode, UiState, Value } from "./types";
@@ -23,6 +23,14 @@ const MAX_STRING_LENGTH = 100_000;
 const MAX_EVAL_DEPTH = 1_000;
 /** Data for callers that load no files: every `Load` reports it is still loading, every `Snippet` shows its loading state. */
 const NO_DATA: ReadonlyMap<string, LoadedData> = new Map();
+/** Components that credit the files their data came from (`loadedFrom`) when no `source:` says where. */
+const SOURCED: Partial<Record<string, true>> = { Table: true, Chart: true, Metric: true };
+/**
+ * Per program, the files each sourced call's arguments Load, found once by
+ * following its names to their definitions: evaluation runs on every input
+ * change, the program only changes with the text.
+ */
+const LOADED_FROM = new WeakMap<Program, Map<CallExpr, readonly string[]>>();
 
 abstract class EvalFailure extends Error {
   constructor(
@@ -463,6 +471,10 @@ class Interpreter {
         const value = this.param(param, arg, scope, `${call.name} ${param.name}`, key);
         if (value !== undefined) props[param.name] = value;
       });
+      if (SOURCED[type] && props.source === undefined) {
+        const from = this.loadedFrom(call, spec);
+        if (from.length > 0) props.loadedFrom = from;
+      }
       const problems = type === "Scene" ? sceneErrors(props, 0) : type === "Shader" ? shaderErrors(props) : [];
       if (problems.length > 0) {
         const more = problems.length > 3 ? `; and ${problems.length - 3} more` : "";
@@ -476,6 +488,22 @@ class Interpreter {
         ? this.node("Loading", key, { path: failure.path, component: type }, call.pos)
         : this.node("Error", key, { message: failure.message }, call.pos);
     }
+  }
+
+  /** The files `call`'s data arguments (all but `source`) read with Load. */
+  private loadedFrom(call: CallExpr, spec: ComponentSpec): readonly string[] {
+    let calls = LOADED_FROM.get(this.program);
+    if (calls === undefined) LOADED_FROM.set(this.program, (calls = new Map()));
+    let from = calls.get(call);
+    if (from === undefined) {
+      const data = spec.params.flatMap((param, index) => {
+        const arg = param.name === "source" ? undefined : argument(call, spec.params, index);
+        return arg === undefined ? [] : [arg];
+      });
+      from = loadsReached(this.program, data);
+      calls.set(call, from);
+    }
+    return from;
   }
 
   /**
@@ -541,7 +569,14 @@ class Interpreter {
         break;
       case "series": {
         const isNumbers = (item: Value) => isList(item) && item.every((n) => typeof n === "number" || n === null);
-        if (isNumbers(value) || (isPlainObject(value) && Object.values(value).every(isNumbers))) return value;
+        // A named series may carry its own tone: {name: {values, tone}}. Widened to read by key: narrowing keeps Action shapes.
+        const isSeries = (item: Value) => {
+          if (isNumbers(item)) return true;
+          if (!isPlainObject(item)) return false;
+          const toned: PlainObject = item;
+          return isNumbers(toned.values ?? null);
+        };
+        if (isNumbers(value) || (isPlainObject(value) && Object.values(value).every(isSeries))) return value;
         break;
       }
       case "function":

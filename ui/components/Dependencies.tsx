@@ -24,7 +24,7 @@ import {
   type VulnerablePackage,
 } from "../../core/dependencies";
 import type { Action } from "../../core/types";
-import { CardDepthContext } from "../runtime";
+import { CardDepthContext, NodeKeyContext } from "../runtime";
 import { formatNumber, TONE_DOT, TONE_PILL, TONE_TEXT, type Props, type Tone } from "../values";
 import { ErrorLine } from "./display";
 import { Button, ButtonGroup, FOCUS_RING } from "./inputs";
@@ -480,6 +480,7 @@ function sendButton(label: string, text: string, primary: boolean) {
 
 export function Dependencies({ props }: { props: Props }) {
   const depth = useContext(CardDepthContext);
+  const question = `${useContext(NodeKeyContext)}/actions`;
   const fade = useEntrance<HTMLDivElement>(FADE);
   const result = useMemo(() => readDependencies(props.report), [props.report]);
   if (!result.ok) return <ErrorLine message={result.error} />;
@@ -519,7 +520,7 @@ export function Dependencies({ props }: { props: Props }) {
           </p>
         </div>
       ) : null}
-      {buttons.length === 0 ? null : <ButtonGroup buttons={buttons} />}
+      {buttons.length === 0 ? null : <ButtonGroup buttons={buttons} question={question} />}
     </div>
   );
   if (depth > 0) return <div className="min-w-0 text-sm text-foreground">{body}</div>;

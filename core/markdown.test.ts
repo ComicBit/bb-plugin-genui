@@ -132,13 +132,13 @@ Button("Delete branch", variant: "destructive", icon: "trash")`),
     ).toBe("Options: Keep branch · ⚠ Delete branch");
   });
 
-  it("renders a form as its fields and its submit label", () => {
+  it("renders a form as its fields, with no submit label (a legacy one is ignored)", () => {
     expect(
       markdown(`$name = "Ada"
 $notify = true
 Form([Input($name, label: "Name"), Toggle($notify, "Notify me")], submit: "Save")
 Form([Input($name)])`),
-    ).toBe("Name: Ada\n\nNotify me: on\n\nSubmit: Save\n\nName: Ada\n\nSubmit: Send");
+    ).toBe("Name: Ada\n\nNotify me: on\n\nName: Ada");
   });
 
   it("merges tree paths and nodes into one indented list", () => {
@@ -220,7 +220,7 @@ describe("specToMarkdown", () => {
   it("compiles, evaluates and renders in one call, with loaded data", () => {
     const data = new Map([[dataKey({ path: "team.csv", raw: false }), parseDataFile("team.csv", "name,role\nAda,Lead")]]);
     const source = 'Card("Team", [Table(["Name", "Role"], Load("team.csv").map(p => [p.name, p.role]))])';
-    expect(specToMarkdown(source, data)).toBe("**Team**\n\n| Name | Role |\n| --- | --- |\n| Ada | Lead |");
+    expect(specToMarkdown(source, data)).toBe("**Team**\n\n| Name | Role |\n| --- | --- |\n| Ada | Lead |\n\nSource: `team.csv`");
     expect(specToMarkdown(source)).toBe("**Team**\n\n_(loading team.csv)_");
   });
 

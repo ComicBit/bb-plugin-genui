@@ -100,11 +100,17 @@ export function persistedStore(storageKey: string, max = MAX_BLOCKS) {
 const blocks = persistedStore(STORAGE_KEY);
 const heights = blocks.store;
 
-function remember(key: string, width: number, height: number): void {
+/** Records the height block `key` settled at, laid out at `width`; written to localStorage shortly after. */
+export function rememberHeight(key: string, width: number, height: number): void {
   const store = heights();
   if (store.get(key, width) === Math.round(height)) return;
   store.set(key, width, height);
   blocks.save();
+}
+
+/** The height block `key` last settled at, laid out at about `width`; at any width when `width` is null. */
+export function storedHeight(key: string, width: number | null = null): number | null {
+  return heights().get(key, width);
 }
 
 /**
@@ -128,13 +134,14 @@ export function useReservedHeight(key: string, loading: boolean, provisional = f
       const held = reserved.current;
       if (held !== null && height >= held - 1) setReserve(null);
       // Heights seen while files or images arrive, while the block is provisional or under a reservation are not its own.
-      if (!unsettled.current && (held === null || height >= held - 1)) remember(key, width, height);
+      if (!unsettled.current && (held === null || height >= held - 1)) rememberHeight(key, width, height);
     },
     [key],
   );
 
   useLayoutEffect(() => {
     if (node === null) return;
+
     // Laid out at another width (a narrower pane, a phone), the stored height doesn't apply.
     const width = node.getBoundingClientRect().width;
     if (reserved.current !== null && heights().get(key, width) === null) setReserve(null);
@@ -160,7 +167,7 @@ export function useReservedHeight(key: string, loading: boolean, provisional = f
     const timer = window.setTimeout(() => {
       const box = node.getBoundingClientRect();
       setReserve(null);
-      if (!unsettled.current) remember(key, box.width, box.height);
+      if (!unsettled.current) rememberHeight(key, box.width, box.height);
     }, RESERVE_MS);
     return () => clearTimeout(timer);
   }, [reserve, loading, node, key]);

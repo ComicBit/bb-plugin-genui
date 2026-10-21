@@ -24,8 +24,8 @@ interface TilePicture {
 /** The viewer's credit line for a found photo. */
 const VIEWER_CREDIT = "justify-center text-white/60 [&_a:hover]:text-white";
 
-/** Photo credit: author and licence, linked to the file's Commons page (which holds the full attribution). */
-function Credit({ image, compact = false, className }: { image: FoundImage; compact?: boolean; className?: string }) {
+/** Photo credit: author and licence, linked to the file's Commons page (which holds the full attribution). Map cards use it too. */
+export function Credit({ image, compact = false, className }: { image: FoundImage; compact?: boolean; className?: string }) {
   return (
     <p className={cn("flex min-w-0 items-baseline gap-1 text-[11px] leading-4 text-muted-foreground", className)}>
       <span className="min-w-0 truncate" title={`${image.creator} · ${image.license}`}>
@@ -56,7 +56,7 @@ const ZOOM_BUTTON =
   "block w-full cursor-zoom-in p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background";
 
 /** A picture filling its box (cropped to it), faded in once decoded. */
-function Fill({ url, alt, onFailed }: { url: string; alt: string; onFailed: () => void }) {
+export function Fill({ url, alt, onFailed }: { url: string; alt: string; onFailed: () => void }) {
   const [decoded, setDecoded] = useState<string | null>(null);
   const ready = decoded === url;
   return (

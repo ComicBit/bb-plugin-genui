@@ -1,14 +1,14 @@
 // Components that explain: a step-by-step Walkthrough, a List of rows, and
 // a month Calendar of events. Each keeps its own React state; the pure parts
 // (parsing, date math) live in explain-logic.ts.
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useContext, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Markdown } from "@get-bb/plugin-sdk/app";
 import { Button as BaseButton } from "@/components/ui/button";
 import { Icon as HostIcon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import { resolveIconName } from "../icons";
 import { RenderNode } from "../render";
-import { useUiRuntime } from "../runtime";
+import { NodeKeyContext, questionClosed, sentFor, useAnswers, useUiRuntime } from "../runtime";
 import { ACCENT, isNode, list, TONE_DOT, TONE_PILL, TONE_TEXT, type Props } from "../values";
 import { Code } from "./code";
 import { CheckMark, ErrorLine } from "./display";
@@ -36,7 +36,7 @@ import {
   type Month,
   type WalkthroughStep,
 } from "./explain-logic";
-import { CAPTION, FOCUS_RING } from "./inputs";
+import { CAPTION, FOCUS_RING, InMessageLine } from "./inputs";
 import { FADE, RISE, SMOOTH_HEIGHT_CLASS, useEntrance, useSmoothHeight } from "./motion";
 
 /** Outline buttons sit on the page color, as inputs.tsx's quiet buttons do. */
@@ -267,17 +267,28 @@ function ListValue({ value }: { value: ListRow["value"] }): ReactNode {
   );
 }
 
-function ListItem({ row, leading }: { row: ListRow; leading: Leading }) {
-  const { run, answer, superseded } = useUiRuntime();
+/** A List row's part in its List's question (only rows that reply use it): picked, sent, and how to pick it. */
+interface RowChoice {
+  readonly pressed: boolean;
+  readonly sent: boolean;
+  /** The question is closed: sent, or the thread moved on. */
+  readonly closed: boolean;
+  pick(text: string): void;
+}
+
+function ListItem({ row, leading, choice }: { row: ListRow; leading: Leading; choice: RowChoice }) {
+  const { run } = useUiRuntime();
   const rise = useEntrance<HTMLLIElement>(RISE);
   const [running, setRunning] = useState(false);
   const icon = row.icon === null ? null : resolveIconName(row.icon);
   const toneName = row.tone ?? "neutral";
   const sends = sentTexts(row.actions);
-  // A row that replies is a choice: once this UI answered, or the thread moved on, it is no longer a question.
-  const closed = sends.length > 0 && (answer !== null || superseded);
-  const sent = closed && answer !== null && sends.includes(answer);
-  const interactive = row.actions.length > 0 && !closed;
+  const others = row.actions.filter((action) => action.type !== "send");
+  // A row that replies is a choice: once its List was answered, or the thread moved on, it is no longer a question.
+  const replies = sends.length > 0;
+  const closed = replies && choice.closed;
+  const pressed = replies && choice.pressed;
+  const interactive = (replies || others.length > 0) && !closed;
   const external = row.actions.some((action) => action.type === "openUrl");
 
   const content = (
@@ -300,10 +311,15 @@ function ListItem({ row, leading }: { row: ListRow; leading: Leading }) {
         )}
       </span>
       <ListValue value={row.value} />
-      {sent ? (
+      {replies && choice.sent ? (
         <>
           <span className="sr-only">Sent</span>
           <CheckMark className="size-4 shrink-0 text-success" />
+        </>
+      ) : pressed ? (
+        <>
+          <span className="sr-only">In your message</span>
+          <CheckMark className="size-4 shrink-0 text-[var(--color-timeline-accent,var(--primary))]" />
         </>
       ) : interactive ? (
         <HostIcon
@@ -322,10 +338,13 @@ function ListItem({ row, leading }: { row: ListRow; leading: Leading }) {
           type="button"
           disabled={running}
           aria-busy={running || undefined}
+          aria-pressed={replies ? pressed : undefined}
           onClick={async () => {
             setRunning(true);
             try {
-              await run(row.actions);
+              // A reply row stages its answer; what else it does (a link, a Set) runs when it is picked.
+              if (!pressed && others.length > 0) await run(others);
+              if (replies) choice.pick(sends.join("\n"));
             } finally {
               setRunning(false);
             }
@@ -333,6 +352,7 @@ function ListItem({ row, leading }: { row: ListRow; leading: Leading }) {
           className={cn(
             // The hover wash bleeds past the text column with shadows, which take no layout space.
             "group/row flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-md py-2.5 text-left transition-[background-color,box-shadow] duration-150 hover:bg-state-hover hover:shadow-[-0.5rem_0_0_var(--state-hover),0.5rem_0_0_var(--state-hover)] disabled:cursor-default disabled:opacity-60",
+            pressed && "bg-state-hover shadow-[-0.5rem_0_0_var(--state-hover),0.5rem_0_0_var(--state-hover)]",
             FOCUS_RING,
           )}
         >
@@ -345,7 +365,11 @@ function ListItem({ row, leading }: { row: ListRow; leading: Leading }) {
   );
 }
 
+/** Rows; the rows that reply (a Send) are one question, a single-select whose pick goes into the user's message. */
 export function List({ props }: { props: Props }) {
+  const { superseded } = useUiRuntime();
+  const { staged, sent, stage } = useAnswers();
+  const question = useContext(NodeKeyContext);
   const rows = parseListRows(props.items);
   if (rows.length === 0) {
     return list(props.items).length === 0 ? null : <ErrorLine message="List items need a title" />;
@@ -356,13 +380,30 @@ export function List({ props }: { props: Props }) {
     : rows.some((row) => row.tone !== null)
       ? "dot"
       : null;
+  const replying = rows.some((row) => sentTexts(row.actions).length > 0);
+  const closed = questionClosed(sent, question, superseded);
+  const answered = sentFor(sent, question, (text) => rows.some((row) => sentTexts(row.actions).includes(text)));
+  const picked = staged.get(question)?.selection ?? null;
   return (
-    <ul className="m-0 flex min-w-0 list-none flex-col p-0">
-      {rows.map((row, index) => (
-        // Rows are positional, like Table rows.
-        <ListItem key={index} row={row} leading={leading} />
-      ))}
-    </ul>
+    <div data-genui-question={replying ? question : undefined} className="flex min-w-0 flex-col gap-2">
+      <ul className="m-0 flex min-w-0 list-none flex-col p-0">
+        {rows.map((row, index) => (
+          // Rows are positional, like Table rows.
+          <ListItem
+            key={index}
+            row={row}
+            leading={leading}
+            choice={{
+              pressed: picked === index,
+              sent: answered !== null && sentTexts(row.actions).includes(answered.text),
+              closed,
+              pick: (text) => void stage(question, picked === index ? null : { text, selection: index }),
+            }}
+          />
+        ))}
+      </ul>
+      {picked !== null && !closed ? <InMessageLine /> : null}
+    </div>
   );
 }
 

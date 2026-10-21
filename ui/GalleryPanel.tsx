@@ -2,10 +2,10 @@
 // with the example specs in the plugin's gallery/ folder (gallery/<Component>.ui
 // and gallery/<Component>-<variant>.ui), rendered exactly as in a chat reply,
 // so components can be checked without a thread. `/gallery/<Component>` shows
-// one component, `/gallery/<Component>-<variant>` one example. Send actions
-// only show what they would send; there is no thread to post to.
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { toast } from "sonner";
+// one component, `/gallery/<Component>-<variant>` one example. Picks and
+// Form answers only show what they would put in the user's message; there is
+// no thread composer to stage them in.
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useBbNavigate, useRpc } from "@get-bb/plugin-sdk/app";
 import { compile } from "../core";
 import { COMPONENTS, type ComponentName } from "../core/catalog";
@@ -13,11 +13,12 @@ import type { rpcContract } from "../server";
 import type { GalleryExample } from "./FrameFooter";
 import { GalleryHeader, groupAnchor, type GallerySelection } from "./GalleryHeader";
 import { componentsIn, GALLERY_GROUPS } from "./gallery-search";
-import { LiveUi, RenderFailure } from "./LiveUi";
+import { LiveUi, RenderFailure, type AnswerTarget } from "./LiveUi";
 import { useAssetLoader, useAudioLoader, useImageLoader, useLoadedData, useTextLoader } from "./useLoadedData";
 import { useMotionScope } from "./components/motion";
 
 const PANEL = "gallery";
+const GALLERY_ANSWERS: AnswerTarget = { kind: "gallery" };
 
 type Listing = { status: "loading" } | { status: "failed"; message: string } | { status: "ready"; names: string[] };
 
@@ -235,9 +236,6 @@ function ExampleBody({ example }: { example: GalleryExample }) {
   const readText = useTextLoader("gallery");
   const loadAudio = useAudioLoader("gallery");
   const loadAsset = useAssetLoader("gallery");
-  const send = useCallback(async (message: string) => {
-    toast(`Would send: ${message}`);
-  }, []);
 
   if (source.status === "loading") return <Notice>Loading…</Notice>;
   if (source.status === "failed") return <Notice>Couldn&apos;t read {file}: {source.message}</Notice>;
@@ -249,7 +247,7 @@ function ExampleBody({ example }: { example: GalleryExample }) {
       source={text}
       stateKey={`bb.genui.gallery:${file}`}
       data={data}
-      send={send}
+      answers={GALLERY_ANSWERS}
       openFile={null}
       loadImage={loadImage}
       readText={readText}

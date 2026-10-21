@@ -22,21 +22,40 @@ The internals behind [the README](../README.md): how agents learn the language, 
      threads `configure` last chose; BB resolves `configure` first within a
      session's resolution.
    - `AGENT_INSTRUCTIONS` (`bb.agents.configure`) comes last, closest to the
-     conversation: when to write UI, which component fits which content, and
-     worked examples. Examples here are what moves models: the same
-     calculator example stopped being followed when it sat in an earlier
-     section. While web lookups are off, `AGENT_INSTRUCTIONS_WEB_OFF` swaps
-     the Map example for a line saying so.
+     conversation. It says what the user wants shown (anything better seen
+     or used than read) and that a markdown table, numbered steps, pasted
+     code or an ASCII diagram is the wrong form for it; that the rest is
+     prose in the agent's own words, never a lone sentence over a card; and
+     that a block is skipped only when the whole reply is a few sentences
+     with nothing to see, "in doubt, add the block". A shape list names a
+     component for every kind of content. Only the message that ends the
+     turn may hold a block: progress notes, thinking and tool input stay
+     plain text, and nothing asks the user to decide mid-turn. Questions go
+     in one Form or one run of Buttons (see 6 below). "Read in BB, not a
+     terminal" is there for Claude Code, whose own system prompt says replies
+     show as markdown in a terminal. Examples here are what moves models:
+     the same calculator example stopped being followed when it sat in an
+     earlier section. While web lookups are off, `AGENT_INSTRUCTIONS_WEB_OFF`
+     swaps the Map example for a line saying so.
    BB refuses a tool whose instructions pass 4,096 characters (the plugin
    then fails to reload) and truncates the other sections there;
    `instructions.test.ts` fails the build past that and compiles every
-   example.
+   example. The four sections and the two tools cost 6,432 input tokens
+   per session (measured against a session without them); about 42% is the
+   component signatures, 42% the guidance. Formats a component can Load are
+   listed once, in the code-work section, not again in its summary. BB's
+   acp provider sends the instructions again, with every other plugin's,
+   each time it starts a new agent process for the thread, and earlier
+   copies stay in the context until it is compacted.
 2. The agent writes the UI inline in its reply, so a UI costs no extra model
    call:
    - ```ui blocks use the spec language, whose components are listed in
      `core/catalog.ts`.
    - ```app blocks hold a self-contained HTML document, for things the
-     components can't express.
+     components can't express. The reference line says what the page can
+     rely on; `ui_examples(["app"])` returns the whole contract (`APP_GUIDE`
+     in `examples.ts`) and the example pages in `gallery/app/`, which
+     `core/appLint.test.ts` keeps lint-clean.
    - `check_ui` is optional: it compiles a block with its files loaded and
      returns the errors (wrong Snippet ranges, unreadable files) and the
      text version of what the user will see. It also tries the block's
@@ -46,9 +65,17 @@ The internals behind [the README](../README.md): how agents learn the language, 
      filled, text cleared, Set buttons pressed. An error one of them adds
      is reported as `After setting $n to 0: …`, so a block that only
      breaks on the first drag is fixed before the reader sees it.
-     `gallery.test.ts` runs the same probes over every example.
+     `gallery.test.ts` runs the same probes over every example. For an app
+     (`language: "app"`, or a spec starting with `<`) it runs
+     `core/appLint.ts` instead, server only since it uses `node:vm`:
+     classic scripts are compiled without running, so syntax errors and
+     top-level await are reported at the app's own lines; network use is
+     an error; dialogs, links that can't open, indexedDB, `genui` calls
+     outside a function and 100vh heights are warnings. Only errors set
+     `isError`. Apps may be 100,000 characters; ```ui specs keep 20,000.
    - `ui_examples` is optional: it returns the gallery examples of the
-     components named (`examples.ts`), with their data files.
+     components named (`examples.ts`), with their data files; "app"
+     returns the app guide.
 3. Rendering depends on the BB version:
    - With BB's merged `experimental_codeFenceRenderer` slot (#5387), BB
      hands each fence to `ui/SlotFence.tsx` with `code`, `language`,
@@ -117,25 +144,84 @@ The internals behind [the README](../README.md): how agents learn the language, 
    live, and keeps it in `localStorage`, since BB answers after a fresh
    page's first blocks have mounted. On the slot path,
    ```app blocks run only after the closing delimiter; the overlay uses the
-   settlement heuristic above. Apps run in an `<iframe sandbox="allow-scripts">`
-   with an opaque origin, a no-network CSP and BB's theme variables, and
-   size themselves to their content. BB's streaming-tail move preserves
+   settlement heuristic above. Until then a preview frame
+   (`sandbox="allow-scripts"`) draws the markup written so far:
+   `core/partialHtml.ts` drops an unfinished tag or entity and every
+   `<script>` and keeps complete `<style>` blocks, the host posts the result
+   at most every 300 ms, and the frame's own bootstrap morphs its body in
+   place (drawn nodes keep their identity), stripping inline handlers,
+   `javascript:` URLs and embedded frames. The finished app opens under the
+   preview at its height and replaces it once loaded. Apps run in an
+   `<iframe sandbox="allow-scripts allow-forms">` with an opaque origin, a
+   no-network CSP (with `form-action 'none'`) and BB's theme variables, and
+   size themselves to their content; their heights go through
+   `reservedHeight.ts` like a block's. BB's streaming-tail move preserves
    iframe documents where `Element.moveBefore` exists; elsewhere an iframe
    can reload once during settlement even though React state survives.
 5. Interactions re-evaluate the spec locally, with no model call. State
-   persists per block in `localStorage`. `Send(text)`, and a Button with no
-   action, post a user message through the thread's composer.
-6. Choices close once used. Consecutive Buttons render side by side (a Row
-   of Buttons too). After a Send from the block, its choice buttons fold
-   into one "sent" line beside the one that was used; once the thread has a
-   user message after the reply (typed, or sent from anywhere), they go away.
+   persists per block in `localStorage`. Inputs outside a Form are local
+   what-if state and never reach the agent. Nothing the user picks is sent
+   on its own: the thread's composer is the answer sheet
+   (`ui/answerSheet.ts`, pure rules in `core/answers.ts`). A question is a
+   run of choice Buttons (no action: the label is the answer; `Send(text)`:
+   that text), a Form, a Plan's Approve, a Decision's option, a FollowUps
+   prompt, the replying rows of a List, or a Findings, Dependencies or
+   Pipeline action. Choices are single-select toggles (`aria-pressed`): a
+   pick stages its answer, picking it again withdraws it, a sibling
+   switches; a Set beside a Send runs at once. A Form's first field edit
+   stages the whole Form as one `Label: answer` line per field
+   (`core/form.ts`; a multi-select lists what was picked and what was not,
+   `CSV, JSON (not: XLSX)`), typed fields after a 300 ms pause; there is no
+   submit button, and `submit:` in old replies is accepted and ignored
+   (catalog `legacy` params never reach a signature). Every block of a
+   thread (each its own React root) stages into one module-level sheet per
+   thread, which keeps one plain-text "answers block" in the draft: its
+   entries in reply order (message by its place in the conversation
+   outline, then fence, then document order in the block), one paragraph
+   appended after what the user wrote, then replaced in place with
+   `composer.replace`, moving the mention ranges after it and never touching
+   the user's text; an empty sheet takes the block out. The sheet owns the
+   range it wrote, not text that looks like it: each draft change is aligned
+   against the last one (common prefix, and common suffix) and the range
+   moves with text typed beside it; an edit inside it, a mention pill over
+   it, or a change the two alignments place on different sides of it (the
+   user pasted the same answer next to it) makes it the user's text, and the
+   next change appends a fresh block. Only extra line breaks between its
+   lines (an editor's paragraphs) leave it the sheet's, then and through
+   later edits beside it; a TextArea answer's own blank line must stay. A
+   change that takes the whole block out withdraws those answers (the
+   composer is the truth for what will be sent), unless it empties the
+   draft: BB submitting (`isSubmitting`) makes them sent at once; otherwise
+   they stay staged until `onSubmitted`, the reply being superseded (the
+   fallback for a composer that reports no submissions), or anything going
+   back into the draft (text, a mention, an attachment) or a new pick, which
+   makes it a deletion. A Form stages only on the user's own edit of a
+   field, never because the sheet's entry differs from it; its typed answer
+   waiting out the pause is written first on leaving the field, on Enter, on
+   any press (BB's send button) and when BB starts submitting (those
+   document listeners exist only while an answer is pending). It never
+   focuses the composer or toasts; a muted "In your message" line marks a
+   staged question. The sheet (entries, the block's range and the draft text
+   it stands in) is read once per thread from `localStorage` and written on
+   every change, so a reload, with the draft BB keeps, restores the picks.
+   Windows on one thread don't merge: the last write wins, and a stale
+   window can at worst append a duplicate block. The gallery shows what a
+   pick would put in the message; only a thread with no composer on screen
+   (or one without `replace`) sends a pick at once, and its Forms keep a
+   Send button.
+6. Choices close once sent. Consecutive Buttons render side by side (a Row
+   of Buttons too). When the user sends the draft (`composer.onSubmitted`)
+   every staged answer becomes its block's sent answer (several per block,
+   kept as `<stateKey>:answers`; a block's single `:answer` from before
+   reads as one): a choice folds into one "sent" line, a Form turns
+   read-only with "Sent". Once the thread has a user message after the
+   reply (typed, or sent from anywhere), its open choices go away.
    `ui/useSuperseded.ts` reads that from BB's conversation outline and
    re-reads it only on thread events that can add a user message, so it
    holds for blocks BB has scrolled out of its timeline. A user row whose
    sequence is below one already listed doesn't count: BB's outline can put
    an old rejected steer at its end (`ui/supersession.ts`). Copy and link
-   buttons stay. A `Form` sends every field as one `label: value` message
-   (`core/form.ts`) and then turns read-only.
+   buttons stay.
 7. A state declared with the wrong but losslessly convertible type
    (`$picked = ""` for a Checklist, `$n = "12"` for a Slider) is read as the
    type the input needs, with a warning instead of a failed block. The
@@ -174,6 +260,12 @@ The internals behind [the README](../README.md): how agents learn the language, 
      (photon.komoot.io, one request a second); tiles come from
      tile.openstreetmap.org, whose tile coordinates reveal the area viewed.
      The map shows the OpenStreetMap attribution.
+   - Map places with `wiki`: the title goes to en.wikipedia.org's page
+     summary. Its lead image counts only when the original is on
+     upload.wikimedia.org, the scaled copy (upload. or thumb.wikimedia.org)
+     is the same Commons file, and Commons' extmetadata names an Artist and
+     a CC or public-domain licence (`findWikiPhoto` in `web/commons.ts`, RPC
+     `web_photo`, cached as `wiki:<title>`: 30 days for a photo, 1 for none).
    - Any https image (Image, Gallery, Entity, Hotspots) is fetched from the
      host in its link, through a proxy that refuses loopback, private,
      link-local and other non-public addresses (checked on the connected
@@ -181,9 +273,49 @@ The internals behind [the README](../README.md): how agents learn the language, 
    Each service sees this machine's IP address, the request and a
    User-Agent naming the plugin; no cookies, thread text or account
    details. Answers are cached in the plugin's own database (up to 128 MB).
-   Markdown renderings run the searches too and then link
-   upload.wikimedia.org directly. Off: nothing is fetched, the components
-   say so, and the instructions tell the agent.
+   Markdown renderings run the searches and Map photo lookups too and then
+   link upload.wikimedia.org directly. Off: nothing is fetched, the
+   components say so, and the instructions tell the agent.
+10. An app's page gets, before the model's HTML, the bootstrap in
+    `ui/appDocument.ts` (ES5 text that runs in the frame) and BB's base
+    styles with the SVG kit: `t`/`ts`/`th` text, `box`, `arr`, `leader`,
+    `tone-*` tints mixed from BB's tokens, and a `#genui-arrow` marker
+    (WebKit has no `context-stroke`, so its arrowheads are drawn in the
+    muted colour). The bootstrap fills the sandbox's gaps:
+    - `localStorage` and `sessionStorage` are in-memory Storage objects (an
+      opaque origin has neither). localStorage writes are posted to the
+      host, debounced, and saved in its localStorage as `<stateKey>:storage`
+      (256 KB per app; `bb.genui.appStorage` indexes them, 1 MB for all,
+      oldest write evicted first); the next document starts with them.
+      Gallery apps don't persist.
+    - `alert`, `confirm`, `prompt` and `window.open` return what a sandbox
+      would and post `blocked`, shown as a note under the app. Chromium
+      fires no submit event without `allow-forms`, so the frame has it, and
+      a capture-phase listener cancels every submit (Chromium lets a form
+      navigate about:srcdoc despite `form-action`). A click on a link the
+      app didn't handle is cancelled: https opens in BB, `#part` sets the
+      document's hash (it would otherwise resolve against BB's address and
+      load BB in the frame), anything else posts `blocked`.
+    - The Animations setting reaches the frame in its config and live
+      (`motion`): off, a style zeroes animation and transition durations,
+      `genui.reducedMotion` is true and `matchMedia` answers the
+      reduced-motion queries itself.
+    - `genui.answer(text)` and `genui.openLink(url)` work only during the
+      user's own gesture (`navigator.userActivation`, or a flag the
+      capture-phase pointer, click, key and change listeners set for the
+      current task). An answer goes to the thread's answer sheet as the
+      block's question `"app"` through the hook ```ui blocks use
+      (`useBlockAnswerTarget` in `LiveUi.tsx`), with the same "In your
+      message" and sent lines.
+    `ui/appBridge.ts` checks everything a frame posts against exact shapes
+    (`height`, `error`, `storage`, `blocked`, `answer`, `openLink` with an
+    https URL, `escape`); the host sends `theme`, `motion` and, to the
+    preview, `preview`. Full screen makes the app's always-displayed
+    `<dialog>` modal (`showModal()`): the top layer escapes any transformed
+    ancestor without moving the iframe, so the app keeps its document, and
+    an Escape the app doesn't handle is forwarded to close it. *Download as
+    HTML* saves the same document built standalone: theme and current
+    storage baked in, `genui.answer` a no-op, links opening a new tab.
 
 ## Components
 
@@ -196,11 +328,13 @@ the instructions list it.
 - Content: Text, Callout, Metric, Badge, Icon, KeyValue, Image, File,
   Entity (product, place or person card with a detail view), Sources, List
 - Data: Table, Chart (bar, line, area, pie, scatter, radar, funnel,
-  heatmap; stacked), Sparkline, Progress, Gauge, SegmentedBar, Steps,
-  Timeline, Calendar, CalendarHeatmap, Tree, Code, Snippet, Diff, Diagram
-  (mermaid, drawn in the Excalidraw style; nodes with `details` open an
-  explanation when clicked; pinch or ⌘/Ctrl + scroll zooms it in place)
-- Media: ImageSearch, Gallery, Map, Hotspots
+  heatmap, histogram, box; stacked), Sparkline, Progress, Gauge,
+  SegmentedBar, Steps, Timeline, Calendar, CalendarHeatmap, Tree, Code,
+  Snippet, Diff, Diagram (mermaid, drawn in the Excalidraw style; nodes with
+  `details` open an explanation when clicked; pinch or ⌘/Ctrl + scroll
+  zooms it in place)
+- Media: ImageSearch, Gallery, Map (days, Wikipedia photos, a tour),
+  Hotspots
 - Inputs: Slider, Stepper, Toggle, Choice (a vertical list when its options
   are long), Radio, Select, Checklist, ListEditor, Input, TextArea, DateInput,
   Rating, OptionCards, Swatches, EditableTable, FollowUps, Button (primary,
@@ -284,6 +418,23 @@ the instructions list it.
   at most six at once, the rest showing their last frame as an image at the
   same height. On touch, vertical swipes keep scrolling the thread.
 
+Table, Chart and Metric take `source:`, a catalog param flagged `unlisted`:
+accepted, but left out of the signatures, since the reference states it once.
+Without it, the evaluator adds `loadedFrom`: the plain-string `Load` paths a
+static walk of the call's arguments reaches through named values, `$state`
+initializers and named functions (`loadsReached` in `core/data.ts`, cached
+per program). `RenderNode` draws either as a caption
+(`ui/components/source.tsx`), never inside a table cell, and a stat strip
+whose Metrics share one names it once; markdown puts `Source: …` under a
+Table or Chart and after a Metric. Histogram and box statistics (type 7
+quartiles, whiskers at 1.5 IQR, automatic bins at the finer of the
+Freedman–Diaconis and Sturges widths rounded to 1, 2 or 5 × 10ⁿ) live in
+`core/distribution.ts`, shared by the renderer and the markdown form.
+`core/map.ts` reads Map's places for the component and its markdown alike:
+a place without `day` stays on the previous one's day, which sets the
+numbering, the list, each day's route and the tour, whose pace is
+`tourStep` in `mapMath.ts` (six seconds over the stops, 300–1500 ms each).
+
 What the user changes inside a component without a `$state` (weights,
 unchecked steps, filters) is kept per block with `ui/usePersistedState.ts`,
 so it survives BB remounting the row as the user scrolls. `ui_examples`
@@ -362,7 +513,12 @@ doesn't render cleanly.
 - **CLI and SDK:** `bb genui render [thread]` prints the last reply with
   ```ui blocks rendered as static markdown (data loaded) and ```app blocks
   replaced by a one-line pointer. The `render_markdown` RPC does the same
-  for SDK consumers. `bb thread output` still returns the raw source.
+  for SDK consumers. `bb thread output` still returns the raw source. In
+  BB, `Frame` takes a `markdown` callback from `LiveUi`, and *Copy as
+  markdown* (the reply's footer and the gallery's) copies
+  `toMarkdownWithImages` of the current roots with the photos the page has
+  already found (`foundImages`, `foundWikiPhotos` in `ui/webLookups.ts`);
+  Project components copy their placeholder line.
 - **Notifications and outlines:** BB's push previews skip fenced blocks. The
   instructions make the reply open with a plain answer sentence, so that
   sentence is what previews show.
@@ -378,11 +534,17 @@ pilot stored.
   `scene.ts` and `shader-args.ts` read the 3D components' arguments,
   `glsl.ts` builds shader sources and maps errors to the agent's lines, and
   `glsl-check.ts` checks shader GLSL without a GPU (server only).
+  `partialHtml.ts` reads an app's streamed markup for the preview,
+  `appLint.ts` checks app pages for check_ui (server only),
+  `distribution.ts` holds the histogram and box statistics, `map.ts` reads
+  Map's places and `source.ts` the data captions.
 - `ui/`:
   - `Fence.tsx`: the shared renderer.
   - `SlotFence.tsx`: the native renderer slot, including terminal status policy.
   - `FenceOverlay.tsx`: the older-BB DOM fallback and settlement heuristic.
-  - `AppBlock.tsx`: the sandboxed apps.
+  - `AppBlock.tsx`: the sandboxed apps (preview, frame, toolbar);
+    `appDocument.ts` their documents and bootstrap; `appBridge.ts` what a
+    frame may post, and app storage in the host.
   - `components/`: one renderer per catalog component. Styling uses host
     token classes only.
   - `GalleryPanel.tsx`: the gallery page; `GalleryHeader.tsx` its title,
@@ -393,8 +555,8 @@ pilot stored.
     and the `bb genui` CLI.
   - `data-source.ts`: the confined file loader, also for the gallery and the
     diagram font in `assets/fonts/`.
-  - `web/`: web lookups (address-checked fetches, Commons search, Photon,
-    OSM tiles, the cache).
+  - `web/`: web lookups (address-checked fetches, Commons search, Wikipedia
+    lead photos, Photon, OSM tiles, the cache).
   - `fallback.ts`: renders replies as markdown; `examples.ts`: `ui_examples`.
 
 ## Develop

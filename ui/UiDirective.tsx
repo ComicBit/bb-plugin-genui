@@ -1,13 +1,14 @@
 // The `::ui{id="…"}` message directive renders UIs stored by the retired
 // show_ui tool, so replies written during the pilot keep rendering. New
 // replies write ```ui blocks instead (FenceOverlay).
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { useComposer, useRpc, type PluginMessageDirectiveProps } from "@get-bb/plugin-sdk/app";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useComposer, useRpc, useSdk, type PluginMessageDirectiveProps } from "@get-bb/plugin-sdk/app";
 import { compile } from "../core";
 import type { rpcContract } from "../server";
-import { LiveUi, RenderFailure, sendThroughComposer } from "./LiveUi";
+import { useAnswerComposers } from "./answerSheet";
+import { LiveUi, RenderFailure, type AnswerTarget } from "./LiveUi";
 import { useAssetLoader, useAudioLoader, useImageLoader, useLoadedData, useTextLoader } from "./useLoadedData";
-import { useSuperseded } from "./useSuperseded";
+import { useReplyIndex, useSuperseded } from "./useSuperseded";
 import { useMotionScope } from "./components/motion";
 
 const UI_ID = /^[a-z0-9]{10}$/;
@@ -53,7 +54,9 @@ function StoredUi({
   openWorkspaceFile: PluginMessageDirectiveProps["openWorkspaceFile"];
 }) {
   const rpc = useRpc<typeof rpcContract>();
+  const sdk = useSdk();
   const composer = useComposer();
+  useAnswerComposers(useMemo(() => [composer], [composer]));
   const [load, setLoad] = useState<Load>({ status: "loading" });
   useEffect(() => {
     let live = true;
@@ -71,7 +74,20 @@ function StoredUi({
   }, [rpc, id]);
   const source = load.status === "ready" ? load.source : "";
   const compiled = useMemo(() => compile(source), [source]);
-  const send = useCallback((text: string) => sendThroughComposer(composer, text), [composer]);
+  const reply = useReplyIndex(threadId, messageId);
+  const answers = useMemo<AnswerTarget>(
+    () => ({
+      kind: "thread",
+      threadId,
+      messageId,
+      fence: 0,
+      reply,
+      send: async (text) => {
+        await sdk.threads.send({ threadId, mode: "queue-if-active", input: [{ type: "text", text, mentions: [] }] });
+      },
+    }),
+    [sdk, threadId, messageId, reply],
+  );
   const data = useLoadedData({ threadId }, compiled.program);
   const loadImage = useImageLoader({ threadId }, `bb.genui.state:${id}`);
   const readText = useTextLoader({ threadId });
@@ -106,7 +122,7 @@ function StoredUi({
           source={source}
           stateKey={`bb.genui.state:${id}`}
           data={data}
-          send={send}
+          answers={answers}
           openFile={openWorkspaceFile}
           loadImage={loadImage}
           readText={readText}
