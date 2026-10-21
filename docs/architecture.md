@@ -116,7 +116,29 @@ The internals behind [the README](../README.md): how agents learn the language, 
    can reload once during settlement even though React state survives.
 5. Interactions re-evaluate the spec locally, with no model call. State
    persists per block in `localStorage`. `Send(text)`, and a Button with no
-   action, post a user message through the thread's composer.
+   action, post a user message through the thread's composer. A control whose
+   action leaves the block says so (`ui/components/action-logic.ts`): a glyph
+   at its end (`Sent` for a message, `ExternalLink` for a link, `Copy` for a
+   copy) and, on hover or keyboard focus, BB's tooltip
+   (`components/ui/tooltip.tsx`, from the `@bb` registry) quoting what it
+   sends, copies or opens. A text the control already shows isn't quoted
+   again: a reply choice's hint reads "Send as your reply", unless the
+   button's width cuts its label off (measured as the pointer arrives or
+   focus lands). Links show the address the browser opens, without a user
+   name or password. This covers Buttons (Decision's, Dependencies' and
+   Pipeline's too), List rows, FollowUps, Form, Plan, the Findings fix
+   buttons, Entity's link, Waterfall's Open and Board cards. `Set` changes
+   only the block, so it gets neither. A block shares one tooltip provider
+   (`HintProvider` in LiveUi), so a neighbour's hint shows without waiting
+   again. Hints take no pointer events and close as the pointer leaves. A
+   control keeps the same tree with or without a hint, so an action that
+   changes with state doesn't remount a focused button. Touch screens show
+   the glyph only. Buttons that open a file in BB draw `FileText`, the File
+   component's icon, so `ExternalLink` always means a web page. A row that
+   names a file draws that icon once: a code frame's header ends with the
+   open button (or leads with a plain icon where BB can't open the file), and
+   a file listed as an item (a Findings group, a review artifact, Acceptance
+   evidence) is itself the control that opens it.
 6. Choices close once used. Consecutive Buttons render side by side (a Row
    of Buttons too). After a Send from the block, its choice buttons fold
    into one "sent" line beside the one that was used; once the thread has a
@@ -196,8 +218,8 @@ the instructions list it.
 - Inputs: Slider, Stepper, Toggle, Choice (a vertical list when its options
   are long), Radio, Select, Checklist, ListEditor, Input, TextArea, DateInput,
   Rating, OptionCards, Swatches, EditableTable, FollowUps, Button (primary,
-  secondary or red destructive; an optional BB icon, resolved against
-  `ui/icons.ts`), Form
+  secondary or red destructive; an optional BB icon in front, resolved
+  against `ui/icons.ts`, and its action's glyph at its end), Form
 - Widgets: Timer, Quiz, Flashcards, Walkthrough
 - Project: Changes, Commits, PullRequest and Threads read the reply's
   thread's own state from BB (its checkout's diff, its branch's commits and

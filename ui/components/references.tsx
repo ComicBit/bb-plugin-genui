@@ -29,10 +29,11 @@ import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import { CardDepthContext, useUiRuntime, type ImageUrl } from "../runtime";
 import { list, optionalText, text, type Props } from "../values";
+import { actionIntent } from "./action-logic";
 import { KeyValue } from "./content";
 import { keyValuePairs } from "./content-model";
 import { ErrorLine } from "./display";
-import { CAPTION, FOCUS_RING } from "./inputs";
+import { ActionHint, CAPTION, FOCUS_RING } from "./inputs";
 import { FADE, reducedMotion, RISE, SMOOTH_HEIGHT_CLASS, useEntrance, useSmoothHeight } from "./motion";
 import {
   domainOf,
@@ -355,10 +356,12 @@ export function Entity({ props }: { props: Props }) {
               {facts.length === 0 ? null : <KeyValue props={{ pairs: props.facts ?? null }} />}
               {link === null ? null : (
                 <DialogFooter>
-                  <BaseButton type="button" size="sm" onClick={() => openUrl(link.href)} className="min-w-0">
-                    <span className="truncate">Open {domainOf(link)}</span>
-                    <Icon name="ExternalLink" aria-hidden />
-                  </BaseButton>
+                  <ActionHint hint={actionIntent([{ kind: "action", type: "openUrl", url: link.href }]).hint}>
+                    <BaseButton type="button" size="sm" onClick={() => openUrl(link.href)} className="min-w-0">
+                      <span className="truncate">Open {domainOf(link)}</span>
+                      <Icon name="ExternalLink" aria-hidden />
+                    </BaseButton>
+                  </ActionHint>
                 </DialogFooter>
               )}
             </DialogContent>

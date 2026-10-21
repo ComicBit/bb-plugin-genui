@@ -163,7 +163,7 @@ export function Snippet({ props }: { props: Props }) {
               }}
               className={ICON_BUTTON}
             >
-              <Icon name="ExternalLink" className="size-3.5" />
+              <Icon name="FileText" className="size-3.5" />
             </button>
           )}
           {code === null || error !== null ? null : <CopyButton code={code} />}

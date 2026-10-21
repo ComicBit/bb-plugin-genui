@@ -452,7 +452,7 @@ function Identity({ role, image, size, differing }: { role: string; image: Compa
         </span>
         {open === null ? null : (
           <button type="button" aria-label={`Open ${image.label}`} title={`Open ${image.src}`} onClick={() => void open()} className={cn(ICON_BUTTON, "size-5")}>
-            <Icon name="ExternalLink" aria-hidden className="size-3" />
+            <Icon name={source.kind === "url" ? "ExternalLink" : "FileText"} aria-hidden className="size-3" />
           </button>
         )}
       </div>

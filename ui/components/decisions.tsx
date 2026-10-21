@@ -43,9 +43,10 @@ import type { Value } from "../../core/types";
 import { useUiRuntime } from "../runtime";
 import { propsKey, usePersistedState } from "../usePersistedState";
 import { formatNumber, optionalText, TONE_PILL, type Props, type Tone } from "../values";
+import { actionIntent } from "./action-logic";
 import { niceScale } from "./chartMath";
 import { CheckMark, ErrorLine } from "./display";
-import { Button, ButtonGroup, CAPTION, FIELD, FOCUS_RING, SentLine } from "./inputs";
+import { ActionGlyph, ActionHint, Button, ButtonGroup, CAPTION, FIELD, FOCUS_RING, SentLine } from "./inputs";
 import { RISE, useEntrance } from "./motion";
 import { ICON_BUTTON, Panel, QuietLine, ShowAll } from "./projectKit";
 
@@ -315,16 +316,20 @@ export function Plan({ props }: { props: Props }) {
             className={cn(FIELD, "px-2.5 placeholder:text-muted-foreground/70")}
           />
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 pt-1">
-            <BaseButton
-              type="button"
-              size="sm"
-              disabled={frozen || message === ""}
-              aria-busy={sending || undefined}
-              onClick={() => void send()}
-              className="w-fit max-w-full text-[13px]"
-            >
-              <span className="truncate">{label}</span>
-            </BaseButton>
+            {/* The caption beside it already quotes the message. */}
+            <ActionHint hint={actionIntent([{ kind: "action", type: "send", text: message }], message).hint}>
+              <BaseButton
+                type="button"
+                size="sm"
+                disabled={frozen || message === ""}
+                aria-busy={sending || undefined}
+                onClick={() => void send()}
+                className="w-fit max-w-full gap-1.5 text-[13px]"
+              >
+                <span className="truncate">{label}</span>
+                <ActionGlyph name="Sent" />
+              </BaseButton>
+            </ActionHint>
             <span aria-live="polite" className="min-w-0 flex-1 basis-56 text-xs leading-4 text-muted-foreground [overflow-wrap:anywhere]">
               {message === "" ? "Check a step or write a note to send." : <>Sends “{message}”</>}
             </span>

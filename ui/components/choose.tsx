@@ -18,9 +18,10 @@ import { resolveIconName } from "../icons";
 import { RenderNode } from "../render";
 import { CardDepthContext, useUiRuntime } from "../runtime";
 import { isBinding, list, nodes, optionalText, type Props } from "../values";
+import { actionIntent } from "./action-logic";
 import { cardOptions, followUpPrompts, sameColor, swatchColors, togglePick, type CardOption } from "./choose-logic";
 import { CheckMark, ErrorLine } from "./display";
-import { CAPTION, SentLine, useClosedChoices } from "./inputs";
+import { ActionHint, CAPTION, SentLine, useClosedChoices } from "./inputs";
 import { useImageUrl, type ImageState } from "./media";
 import { reducedMotion, RISE, useEntrance } from "./motion";
 import { ExpandButton, useGroupPicture, ViewerGroup } from "./viewer";
@@ -421,19 +422,21 @@ function FollowUpRow({ prompt, disabled, onSend }: { prompt: string; disabled: b
   const rise = useEntrance<HTMLLIElement>(RISE);
   return (
     <li ref={rise} className="min-w-0 border-t border-border/70">
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={onSend}
-        className="group/follow flex min-h-10 w-full min-w-0 cursor-pointer touch-manipulation items-center gap-3 rounded-sm py-2 text-left text-sm leading-5 text-muted-foreground transition-colors duration-150 hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-default motion-reduce:transition-none"
-      >
-        <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{prompt}</span>
-        <Icon
-          name="ArrowRight"
-          aria-hidden
-          className="size-3.5 shrink-0 transition-transform duration-150 group-hover/follow:translate-x-0.5 motion-reduce:transition-none"
-        />
-      </button>
+      <ActionHint hint={actionIntent([{ kind: "action", type: "send", text: prompt }], prompt).hint} align="end">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onSend}
+          className="group/follow flex min-h-10 w-full min-w-0 cursor-pointer touch-manipulation items-center gap-3 rounded-sm py-2 text-left text-sm leading-5 text-muted-foreground transition-colors duration-150 hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-default motion-reduce:transition-none"
+        >
+          <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{prompt}</span>
+          <Icon
+            name="Sent"
+            aria-hidden
+            className="size-3.5 shrink-0 transition-transform duration-150 group-hover/follow:translate-x-0.5 motion-reduce:transition-none"
+          />
+        </button>
+      </ActionHint>
     </li>
   );
 }

@@ -4,6 +4,20 @@ What changed in each version of the Generative UI plugin for BB. Update an insta
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Buttons say what pressing them really does. A glyph at the end names the action: a paper plane when it sends a message, the external-link arrow when it opens a link, the copy icon when it copies. Hover or keyboard focus shows BB's tooltip quoting it: `Send “Open a PR for this branch”`, `Open https://…`, `Copy “fix/upload-race”`; a choice that sends its own label reads `Send as your reply`, unless the label is cut off. A link shows the address the browser opens, so `https://github.com@evil.com/` reads `https://evil.com/`. This covers Button (with Decision's, Dependencies' and Pipeline's buttons), List rows, FollowUps, Form, Plan, the Findings fix buttons, the Entity link, Waterfall's *Open* and Board cards.
+
+### Changed
+- A Button's own `icon:` stays in front and the action's glyph goes at the end, so a link keeps its arrow when it has an icon too. A send, link or copy glyph given as `icon:` only appears for that action, once.
+- List rows that send show the paper plane instead of the chevron, and FollowUps show it instead of the arrow. Board cards that open their issue show the link arrow by the key, and BB's tooltip replaces the browser's.
+- Buttons that open a file in BB show a file icon instead of the external-link arrow: Snippet, Changes, Tests, the code-health reports (Findings, Coverage, StackTrace, Acceptance and Provenance evidence), the picture viewer, and Compare when its image is a file. The arrow is left for web pages.
+- A row that names a file shows the file icon once. A Findings file group, a review's artifact and Acceptance's file evidence open the file from their icon and path, and Provenance's file evidence has the header of a code excerpt.
+
+### Fixed
+- A review artifact that is a web address opens as a link, with the link arrow, instead of showing as a file that can't be opened.
+
 ## [0.2.6] - 2026-10-21
 
 ### Added

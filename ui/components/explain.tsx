@@ -10,6 +10,7 @@ import { resolveIconName } from "../icons";
 import { RenderNode } from "../render";
 import { useUiRuntime } from "../runtime";
 import { ACCENT, isNode, list, TONE_DOT, TONE_PILL, TONE_TEXT, type Props } from "../values";
+import { actionIntent } from "./action-logic";
 import { Code } from "./code";
 import { CheckMark, ErrorLine } from "./display";
 import {
@@ -36,7 +37,7 @@ import {
   type Month,
   type WalkthroughStep,
 } from "./explain-logic";
-import { CAPTION, FOCUS_RING } from "./inputs";
+import { ActionHint, CAPTION, FOCUS_RING } from "./inputs";
 import { FADE, RISE, SMOOTH_HEIGHT_CLASS, useEntrance, useSmoothHeight } from "./motion";
 
 /** Outline buttons sit on the page color, as inputs.tsx's quiet buttons do. */
@@ -278,7 +279,7 @@ function ListItem({ row, leading }: { row: ListRow; leading: Leading }) {
   const closed = sends.length > 0 && (answer !== null || superseded);
   const sent = closed && answer !== null && sends.includes(answer);
   const interactive = row.actions.length > 0 && !closed;
-  const external = row.actions.some((action) => action.type === "openUrl");
+  const { glyph, hint } = actionIntent(row.actions, row.title);
 
   const content = (
     <>
@@ -307,7 +308,8 @@ function ListItem({ row, leading }: { row: ListRow; leading: Leading }) {
         </>
       ) : interactive ? (
         <HostIcon
-          name={external ? "ExternalLink" : "ChevronRight"}
+          // What a tap does: send, open or copy; a row that only changes this UI keeps the chevron.
+          name={glyph ?? "ChevronRight"}
           aria-hidden
           className="size-3.5 shrink-0 text-muted-foreground transition-colors duration-150 group-hover/row:text-foreground"
         />
@@ -318,26 +320,28 @@ function ListItem({ row, leading }: { row: ListRow; leading: Leading }) {
   return (
     <li ref={rise} className="min-w-0 border-b border-border/60 last:border-b-0">
       {interactive ? (
-        <button
-          type="button"
-          disabled={running}
-          aria-busy={running || undefined}
-          onClick={async () => {
-            setRunning(true);
-            try {
-              await run(row.actions);
-            } finally {
-              setRunning(false);
-            }
-          }}
-          className={cn(
-            // The hover wash bleeds past the text column with shadows, which take no layout space.
-            "group/row flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-md py-2.5 text-left transition-[background-color,box-shadow] duration-150 hover:bg-state-hover hover:shadow-[-0.5rem_0_0_var(--state-hover),0.5rem_0_0_var(--state-hover)] disabled:cursor-default disabled:opacity-60",
-            FOCUS_RING,
-          )}
-        >
-          {content}
-        </button>
+        <ActionHint hint={hint} align="end">
+          <button
+            type="button"
+            disabled={running}
+            aria-busy={running || undefined}
+            onClick={async () => {
+              setRunning(true);
+              try {
+                await run(row.actions);
+              } finally {
+                setRunning(false);
+              }
+            }}
+            className={cn(
+              // The hover wash bleeds past the text column with shadows, which take no layout space.
+              "group/row flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-md py-2.5 text-left transition-[background-color,box-shadow] duration-150 hover:bg-state-hover hover:shadow-[-0.5rem_0_0_var(--state-hover),0.5rem_0_0_var(--state-hover)] disabled:cursor-default disabled:opacity-60",
+              FOCUS_RING,
+            )}
+          >
+            {content}
+          </button>
+        </ActionHint>
       ) : (
         <div className="flex min-w-0 items-center gap-3 py-2.5">{content}</div>
       )}

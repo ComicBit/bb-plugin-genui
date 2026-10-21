@@ -40,9 +40,11 @@ import {
   type VerdictTone,
 } from "../../core/findings";
 import { commonDirectory, displayPath } from "../../core/test-results";
+import type { Action } from "../../core/types";
 import { CardDepthContext, useUiRuntime, type TextFile } from "../runtime";
 import { propsKey, usePersistedState } from "../usePersistedState";
 import { formatNumber, optionalText, TONE_DOT, TONE_PILL, TONE_TEXT, type Props, type Tone } from "../values";
+import { actionIntent } from "./action-logic";
 import {
   acceptStrings,
   Chevron,
@@ -53,6 +55,7 @@ import {
   ReportPathsContext,
   Segmented,
   TEXT_BUTTON,
+  useFileOpener,
   useFileText,
   useShownPath,
   useWorkspaceRoot,
@@ -60,6 +63,7 @@ import {
 } from "./codeHealthKit";
 import { Code, Diff } from "./code";
 import { ErrorLine } from "./display";
+import { ActionGlyph, ActionHint, FOCUS_RING } from "./inputs";
 import { CHART_DRAW_MS, FADE, RISE, useEntrance, type Entrance } from "./motion";
 import { ICON_BUTTON } from "./projectKit";
 
@@ -206,26 +210,30 @@ function SendButton({ message, label, icon, primary = false }: { message: string
   const { run, answer } = useUiRuntime();
   const [running, setRunning] = useState(false);
   const sent = answer === message;
+  const send: Action = { kind: "action", type: "send", text: message };
   return (
-    <BaseButton
-      type="button"
-      size="sm"
-      variant={primary ? "default" : "outline"}
-      disabled={running}
-      aria-busy={running || undefined}
-      onClick={async () => {
-        setRunning(true);
-        try {
-          await run([{ kind: "action", type: "send", text: message }]);
-        } finally {
-          setRunning(false);
-        }
-      }}
-      className={cn("h-7 w-fit max-w-full gap-1.5 px-2.5 text-xs", !primary && "bg-background text-foreground")}
-    >
-      <Icon name={sent ? "Check" : icon} aria-hidden className="size-3.5 shrink-0" />
-      <span className="truncate">{sent ? "Sent" : label}</span>
-    </BaseButton>
+    <ActionHint hint={actionIntent([send]).hint}>
+      <BaseButton
+        type="button"
+        size="sm"
+        variant={primary ? "default" : "outline"}
+        disabled={running}
+        aria-busy={running || undefined}
+        onClick={async () => {
+          setRunning(true);
+          try {
+            await run([send]);
+          } finally {
+            setRunning(false);
+          }
+        }}
+        className={cn("h-7 w-fit max-w-full gap-1.5 px-2.5 text-xs", !primary && "bg-background text-foreground")}
+      >
+        <Icon name={sent ? "Check" : icon} aria-hidden className="size-3.5 shrink-0" />
+        <span className="truncate">{sent ? "Sent" : label}</span>
+        {sent ? null : <ActionGlyph name="Sent" />}
+      </BaseButton>
+    </ActionHint>
   );
 }
 
@@ -464,14 +472,50 @@ function GroupHeader({ group, scale, mode }: { group: FindingGroup; scale: Sever
     );
   }
   return (
-    <h4 className="m-0 flex min-w-0 items-center gap-2 py-1 text-xs font-normal leading-5">
-      <Icon name={group.file === null ? "FileQuestion" : "FileText"} aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-      <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-foreground" title={group.file ?? undefined}>
-        {group.file === null ? "No file" : shownPath(group.file)}
-      </span>
+    <h4 className="m-0 flex min-w-0 items-center justify-between gap-2 py-1 text-xs font-normal leading-5">
+      {group.file === null ? (
+        <span className="flex min-w-0 items-center gap-2">
+          <Icon name="FileQuestion" aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate font-mono text-[12px] text-foreground">No file</span>
+        </span>
+      ) : (
+        <FileLink path={group.file} shown={shownPath(group.file)} className="text-[12px]" />
+      )}
       <Counts counts={group.counts} scale={scale} />
-      {group.file === null ? <span className="size-6" /> : <OpenFileButton path={group.file} line={null} />}
     </h4>
+  );
+}
+
+/** A file's icon and path as one control that opens it in BB; plain where BB can't open it. */
+function FileLink({ path, shown, className }: { path: string; shown: string; className?: string }) {
+  const file = useFileOpener(path);
+  const content = (
+    <>
+      <Icon
+        name="FileText"
+        aria-hidden
+        className="size-3.5 shrink-0 text-muted-foreground transition-colors duration-150 group-hover/file:text-foreground"
+      />
+      <span className="truncate underline-offset-2 group-hover/file:underline">{shown}</span>
+    </>
+  );
+  const shape = cn("flex min-w-0 items-center gap-2 font-mono text-foreground", className);
+  if (file === null) {
+    return (
+      <span title={path} className={shape}>
+        {content}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      title={`Open ${file.target}`}
+      onClick={() => void file.open(null)}
+      className={cn("group/file cursor-pointer rounded-sm text-left", FOCUS_RING, shape)}
+    >
+      {content}
+    </button>
   );
 }
 
@@ -508,12 +552,23 @@ function ReviewEvidence({ review, open, onToggle }: { review: Review; open: bool
             {review.artifacts.length === 0 ? null : (
               <ul className="m-0 flex min-w-0 list-none flex-col p-0">
                 {review.artifacts.map((path) => (
-                  <li key={path} className="flex min-w-0 items-center gap-2 text-xs leading-6">
-                    <Icon name="FileText" aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-foreground" title={path}>
-                      {path}
-                    </span>
-                    {/^https?:\/\//.test(path) ? null : <OpenFileButton path={path} line={null} />}
+                  <li key={path} className="flex min-w-0 text-xs leading-6">
+                    {/^https?:\/\//.test(path) ? (
+                      <UrlLink
+                        href={path}
+                        title={path}
+                        className={cn(
+                          "flex min-w-0 items-center gap-2 rounded-sm font-mono text-[11.5px] text-primary underline-offset-2 hover:underline",
+                          FOCUS_RING,
+                        )}
+                      >
+                        <Icon name="Globe" aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+                        <span className="truncate">{path}</span>
+                        <Icon name="ExternalLink" aria-hidden className="size-3 shrink-0" />
+                      </UrlLink>
+                    ) : (
+                      <FileLink path={path} shown={path} className="text-[11.5px]" />
+                    )}
                   </li>
                 ))}
               </ul>

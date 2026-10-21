@@ -18,6 +18,7 @@ import {
 import { RenderNodes } from "./render";
 import { useReservedHeight } from "./reservedHeight";
 import { UiRuntimeContext, type UiRuntime } from "./runtime";
+import { HintProvider } from "./components/inputs";
 import { EntranceContext, newStreamCadence, trackStream, useMotionScope } from "./components/motion";
 
 /** Blocks mounted in this page, so a remount (BB's timeline while scrolling) doesn't replay entrances. */
@@ -231,14 +232,16 @@ export function LiveUi({
   return (
     <UiRuntimeContext value={runtime}>
       <EntranceContext value={entrance}>
-        <Frame source={source} diagnostics={[...compileDiagnostics, ...diagnostics]} files={files} gallery={gallery}>
-          {/* Holds the height this block last settled at while what it reads arrives (reservedHeight.ts). */}
-          <div style={minHeight === undefined ? undefined : { minHeight }}>
-            <div ref={content} className="flex flex-col gap-3">
-              {tree}
+        <HintProvider>
+          <Frame source={source} diagnostics={[...compileDiagnostics, ...diagnostics]} files={files} gallery={gallery}>
+            {/* Holds the height this block last settled at while what it reads arrives (reservedHeight.ts). */}
+            <div style={minHeight === undefined ? undefined : { minHeight }}>
+              <div ref={content} className="flex flex-col gap-3">
+                {tree}
+              </div>
             </div>
-          </div>
-        </Frame>
+          </Frame>
+        </HintProvider>
       </EntranceContext>
     </UiRuntimeContext>
   );

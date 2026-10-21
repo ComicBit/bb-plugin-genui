@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { formMessage } from "../../core/form";
+import type { Action } from "../../core/types";
 import { Button as BaseButton } from "@/components/ui/button";
 import { RenderNodes } from "../render";
 import { useUiRuntime } from "../runtime";
 import { nodes, optionalText, type Props } from "../values";
-import { SentLine } from "./inputs";
+import { actionIntent } from "./action-logic";
+import { ActionGlyph, ActionHint, SentLine } from "./inputs";
 
 /**
  * Disabled fields keep their values legible: no UA graying (Safari dims
@@ -23,6 +25,7 @@ export function Form({ props }: { props: Props }) {
   const { run, answer, superseded } = useUiRuntime();
   const [sending, setSending] = useState(false);
   const message = formMessage({ kind: "node", type: "Form", key: "", props });
+  const send: Action = { kind: "action", type: "send", text: message };
   const label = optionalText(props.submit)?.trim() || "Send";
   return (
     <fieldset
@@ -33,23 +36,26 @@ export function Form({ props }: { props: Props }) {
       {answer !== null ? (
         <SentLine text={null} />
       ) : superseded ? null : (
-        <BaseButton
-          type="button"
-          size="sm"
-          disabled={sending || message === ""}
-          aria-busy={sending || undefined}
-          onClick={async () => {
-            setSending(true);
-            try {
-              await run([{ kind: "action", type: "send", text: message }]);
-            } finally {
-              setSending(false);
-            }
-          }}
-          className="w-fit max-w-full text-[13px]"
-        >
-          <span className="truncate">{label}</span>
-        </BaseButton>
+        <ActionHint hint={actionIntent([send]).hint}>
+          <BaseButton
+            type="button"
+            size="sm"
+            disabled={sending || message === ""}
+            aria-busy={sending || undefined}
+            onClick={async () => {
+              setSending(true);
+              try {
+                await run([send]);
+              } finally {
+                setSending(false);
+              }
+            }}
+            className="w-fit max-w-full gap-1.5 text-[13px]"
+          >
+            <span className="truncate">{label}</span>
+            <ActionGlyph name="Sent" />
+          </BaseButton>
+        </ActionHint>
       )}
     </fieldset>
   );

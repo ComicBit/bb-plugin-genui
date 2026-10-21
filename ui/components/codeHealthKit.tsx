@@ -67,31 +67,43 @@ export function useShownPath(): (path: string) => string {
   return (path) => displayPath(path, root, common);
 }
 
-/** An icon that opens `path` in BB at `line`, where BB can open it; nothing elsewhere. */
-export function OpenFileButton({ path, line, label }: { path: string; line: number | null; label?: string }) {
+/** How `path` opens in BB: the path BB opens, and `open` at a line (a toast when it fails); null where BB can't open it. */
+export function useFileOpener(path: string): { readonly target: string; open(line: number | null): Promise<void> } | null {
   const { openFile } = useUiRuntime();
   const { root } = useContext(ReportPathsContext);
   const target = workspacePath(path, root);
   if (openFile === null || target === null) return null;
-  const where = line === null ? target : `${target}:${line}`;
+  return {
+    target,
+    async open(line) {
+      let opened = false;
+      try {
+        opened = await openFile(target, line ?? undefined);
+      } catch {
+        opened = false;
+      }
+      if (!opened) toast.error(`Couldn't open ${target}`);
+    },
+  };
+}
+
+/** An icon that opens `path` in BB at `line`, where BB can open it; nothing elsewhere. */
+export function OpenFileButton({ path, line, label }: { path: string; line: number | null; label?: string }) {
+  const file = useFileOpener(path);
+  if (file === null) return null;
+  const where = line === null ? file.target : `${file.target}:${line}`;
   return (
     <button
       type="button"
       title={`Open ${where}`}
-      aria-label={label ?? (line === null ? `Open ${target}` : `Open ${target} at line ${line}`)}
-      onClick={async (event) => {
+      aria-label={label ?? (line === null ? `Open ${file.target}` : `Open ${file.target} at line ${line}`)}
+      onClick={(event) => {
         event.stopPropagation();
-        let opened = false;
-        try {
-          opened = await openFile(target, line ?? undefined);
-        } catch {
-          opened = false;
-        }
-        if (!opened) toast.error(`Couldn't open ${target}`);
+        void file.open(line);
       }}
       className={ICON_BUTTON}
     >
-      <Icon name="ExternalLink" className="size-3.5" />
+      <Icon name="FileText" className="size-3.5" />
     </button>
   );
 }
