@@ -130,6 +130,14 @@ export function niceScale(low: number, high: number, count = 4, zero = false): S
   return { min: ticks[0]!, max: ticks[ticks.length - 1]!, ticks };
 }
 
+/** A count axis from zero to at least `max` in about four whole-number steps (never 2.5). */
+export function countTicks(max: number): number[] {
+  const nice = niceStep(Math.max(1, max) / 4);
+  const step = Math.max(1, Number.isInteger(nice) ? nice : Math.floor(nice));
+  const top = Math.max(step, Math.ceil(max / step) * step);
+  return Array.from({ length: top / step + 1 }, (_, i) => i * step);
+}
+
 /** A number, or a string that is exactly one (`"2.5"`, `" 10 "`); else null. Scatter x values. */
 export function numericValue(value: unknown): number | null {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;

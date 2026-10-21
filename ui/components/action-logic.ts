@@ -1,7 +1,8 @@
 // What pressing a control does, for the glyph at its end and its tooltip.
-// Only actions that leave the block are named: a message to the agent, a link,
+// Only actions that leave the block are named: an answer to the agent, a link,
 // a copy. Set only changes the block, where its effect shows anyway.
 import type { Action } from "../../core/types";
+import type { Answers } from "../runtime";
 
 /** The glyph of each action that leaves the block, by weight: a message, then a link, then a copy. */
 const GLYPHS = [
@@ -18,6 +19,22 @@ export const ACTION_GLYPHS: ReadonlySet<string> = new Set(GLYPHS.map(([, glyph])
 /** How many characters of a sent or copied text, or of a link, a hint shows. */
 const HINT_TEXT_MAX = 200;
 
+/**
+ * What pressing does with a control's Send actions (its answer), on the
+ * thread's answer sheet (ui/answerSheet.ts): "stage" puts it in the user's
+ * message, "send" posts it at once (no composer for the thread on screen),
+ * "withdraw" takes the picked answer back out, and "none" skips it (the
+ * question is closed, or the control holds no answer).
+ */
+export type SendEffect = "stage" | "send" | "withdraw" | "none";
+
+/** The SendEffect of an answer control that is `open` (its question not closed) and `picked` (its answer staged), where answers go to `target`. */
+export function sendEffect(target: Answers["target"], open: boolean, picked: boolean): SendEffect {
+  if (!open) return "none";
+  if (picked) return "withdraw";
+  return target === "direct" ? "send" : "stage";
+}
+
 export interface ActionIntent {
   /** BB's icon for what pressing does; null when it only changes this UI. */
   readonly glyph: ActionGlyph | null;
@@ -26,17 +43,23 @@ export interface ActionIntent {
 }
 
 /**
- * What pressing a control running `actions` does. `shown` is the text the
- * control already shows (its label): a message or copy of that same text is
- * not quoted again, and the hint says where it goes instead. A link is always
- * spelled out, since its label can say anything.
+ * What pressing a control running `actions` does, where its Send actions do
+ * `send` (skipped unless given). `shown` is the text the control already
+ * shows (its label): an answer or copy of that same text is not quoted
+ * again, and the hint says where it goes instead. A link is always spelled
+ * out, since its label can say anything. Taking a picked answer back out
+ * runs nothing else, so it is the only line.
  */
-export function actionIntent(actions: readonly Action[], shown?: string): ActionIntent {
-  const glyph = GLYPHS.find(([type]) => actions.some((action) => action.type === type))?.[1] ?? null;
+export function actionIntent(actions: readonly Action[], { send = "none", shown }: { send?: SendEffect; shown?: string } = {}): ActionIntent {
+  const answers = send !== "none" && actions.some((action) => action.type === "send");
+  if (answers && send === "withdraw") return { glyph: "Sent", hint: "Take it out of your message" };
+  const glyph = GLYPHS.find(([type]) => (type === "send" ? answers : actions.some((action) => action.type === type)))?.[1] ?? null;
   const visible = shown === undefined ? null : words(shown);
   const lines = actions.flatMap((action) => {
     switch (action.type) {
       case "send":
+        if (!answers) return [];
+        if (send === "stage") return [words(action.text) === visible ? "Add to your message" : `Add “${clip(action.text)}” to your message`];
         return [words(action.text) === visible ? "Send as your reply" : `Send “${clip(action.text)}”`];
       case "openUrl": {
         const url = openableLink(action.url);

@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { act } from "react";
+import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type * as PluginSdkApp from "@get-bb/plugin-sdk/app";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Action, Value } from "../../core/types";
-import { UiRuntimeContext, type UiRuntime } from "../runtime";
+import { useBlockAnswerTarget, type AnswerTarget } from "../LiveUi";
+import { AnswersContext, UiRuntimeContext, type UiRuntime } from "../runtime";
 import type { Props } from "../values";
 import { FollowUps } from "./choose";
 import { List } from "./explain";
@@ -15,6 +16,7 @@ vi.mock("@get-bb/plugin-sdk/app", async (importOriginal) => ({
   ...(await importOriginal<typeof PluginSdkApp>()),
   experimental_Icon: ({ name }: { name: string }) => <i data-icon={name} />,
   useSettings: () => ({ values: undefined, isLoading: true }),
+  useComposers: () => [],
 }));
 
 const send = (text: string): Action => ({ kind: "action", type: "send", text });
@@ -28,18 +30,29 @@ const runtime: UiRuntime = {
   run,
   openFile: null,
   loadImage: null,
+  holdHeight: () => () => {},
   readText: null,
   loadAudio: null,
   loadAsset: null,
-  answer: null,
   superseded: false,
   threadId: null,
   blockKey: null,
 };
 
+/** The gallery's answer sheet: a pick goes into the (previewed) message, as it would into a thread's composer. */
+const GALLERY: AnswerTarget = { kind: "gallery" };
+/** A block's questions on the answer sheet `target`; each test is its own block, so no pick carries over. */
+let blockKey = "";
+function Block({ target, children }: { target: AnswerTarget; children: ReactNode }) {
+  const answers = useBlockAnswerTarget(target, blockKey, false, () => 0);
+  return <AnswersContext value={answers}>{children}</AnswersContext>;
+}
+
 let container: HTMLDivElement;
 let root: Root;
+let blocks = 0;
 beforeEach(() => {
+  blockKey = `inputs.test:${++blocks}`;
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   // jsdom has no Web Animations, which entrances play.
   Object.defineProperty(Element.prototype, "animate", { configurable: true, value: () => ({ cancel() {} }) });
@@ -54,8 +67,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function render(element: React.ReactNode): void {
-  act(() => root.render(<UiRuntimeContext value={runtime}>{element}</UiRuntimeContext>));
+function render(element: ReactNode, target: AnswerTarget = GALLERY): void {
+  act(() =>
+    root.render(
+      <UiRuntimeContext value={runtime}>
+        <Block target={target}>{element}</Block>
+      </UiRuntimeContext>,
+    ),
+  );
 }
 
 /** A button's content in order: `[Name]` for an icon, its text otherwise. */
@@ -77,16 +96,29 @@ function hintOnFocus(button: HTMLElement): string | null {
   return hint;
 }
 
-function renderButton(props: Props): HTMLButtonElement {
-  render(<Button props={props} />);
+function renderButton(props: Props, target?: AnswerTarget): HTMLButtonElement {
+  render(<Button props={props} />, target);
   return container.querySelector("button")!;
 }
 
 describe("Button", () => {
-  it("ends a reply choice with the send glyph, and its hint says where the label goes", () => {
+  it("ends a reply choice with the send glyph, and its hint says the pick goes into the message, then back out", async () => {
     const button = renderButton({ label: "Use Redis" });
     expect(face(button)).toBe("Use Redis [Sent]");
+    expect(hintOnFocus(button)).toBe("Add to your message");
+    await act(async () => button.click());
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+    expect(face(button)).toBe("[Check] Use Redis [Sent]");
+    expect(hintOnFocus(button)).toBe("Take it out of your message");
+  });
+
+  it("says a pick is sent at once where the thread has no composer, and sends it", async () => {
+    const posted = vi.fn(async (_text: string) => {});
+    const target: AnswerTarget = { kind: "thread", threadId: `direct:${blocks}`, messageId: "reply", fence: 0, reply: null, send: posted };
+    const button = renderButton({ label: "Use Redis" }, target);
     expect(hintOnFocus(button)).toBe("Send as your reply");
+    await act(async () => button.click());
+    expect(posted).toHaveBeenCalledWith("Use Redis");
   });
 
   it("quotes a label the button's width cuts off", () => {
@@ -95,13 +127,13 @@ describe("Button", () => {
     const shown = [...button.querySelectorAll("span")].find((span) => span.textContent === label)!;
     Object.defineProperty(shown, "scrollWidth", { configurable: true, value: 480 });
     Object.defineProperty(shown, "clientWidth", { configurable: true, value: 220 });
-    expect(hintOnFocus(button)).toBe(`Send “${label}”`);
+    expect(hintOnFocus(button)).toBe(`Add “${label}” to your message`);
   });
 
   it("keeps the spec's icon in front and the action's glyph at the end", () => {
     const pr = renderButton({ label: "Open the PR", action: [send("Open a PR for this branch")], icon: "git-pull-request" });
     expect(face(pr)).toBe("[GitPullRequest] Open the PR [Sent]");
-    expect(hintOnFocus(pr)).toBe("Send “Open a PR for this branch”");
+    expect(hintOnFocus(pr)).toBe("Add “Open a PR for this branch” to your message");
 
     const notes = renderButton({ label: "Release notes", action: [open("https://github.com/vitest-dev/vitest/releases")], icon: "github" });
     expect(face(notes)).toBe("[Github] Release notes [ExternalLink]");
@@ -138,13 +170,15 @@ describe("Button", () => {
     expect(face(button)).toBe("Next");
   });
 
-  it("runs every action when pressed, the hint naming each outward one", async () => {
+  it("runs the other actions and stages the answer when picked, the hint naming each outward one", async () => {
     const actions = [set("plan", "Pro"), copy("PRO-2026"), send("Go with Pro")];
     const button = renderButton({ label: "Go with Pro", action: actions, variant: "primary" });
     expect(face(button)).toBe("Go with Pro [Sent]");
-    expect(hintOnFocus(button)).toBe("Copy “PRO-2026”\nSend as your reply");
+    expect(hintOnFocus(button)).toBe("Copy “PRO-2026”\nAdd to your message");
     await act(async () => button.click());
-    expect(run).toHaveBeenCalledWith(actions);
+    expect(run).toHaveBeenCalledWith(actions.slice(0, 2));
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+    expect(hintOnFocus(button)).toBe("Take it out of your message");
   });
 });
 
@@ -167,7 +201,7 @@ describe("List rows", () => {
       "ExternalLink",
       "ChevronRight",
     ]);
-    expect(rows.map(hintOnFocus)).toEqual(["Send as your reply", "Open https://github.com/vitest-dev/vitest/releases", null]);
+    expect(rows.map(hintOnFocus)).toEqual(["Add to your message", "Open https://github.com/vitest-dev/vitest/releases", null]);
   });
 
   it("draw an action's glyph given as a row's icon once, at the end, and keep it on a row that doesn't act", () => {
@@ -201,10 +235,10 @@ describe("List rows", () => {
 });
 
 describe("FollowUps", () => {
-  it("end with the send glyph, and the hint says the prompt goes as the reply", () => {
+  it("end with the send glyph, and the hint says the prompt goes into the message", () => {
     render(<FollowUps props={{ prompts: ["How do I deploy this?"] }} />);
     const row = container.querySelector("button")!;
     expect(face(row)).toBe("How do I deploy this? [Sent]");
-    expect(hintOnFocus(row)).toBe("Send as your reply");
+    expect(hintOnFocus(row)).toBe("Add to your message");
   });
 });

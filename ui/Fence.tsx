@@ -2,40 +2,35 @@
 // through LiveUi, ```app renders a sandboxed HTML app. Both the BB fence slot
 // and the DOM overlay mount this, so they behave the same.
 import { memo, useCallback, useMemo, useRef } from "react";
-import { useBbNavigate, useComposers, useSdk, type ExperimentalLiveFileTarget, type PluginComposerApi } from "@get-bb/plugin-sdk/app";
+import { useBbNavigate, useComposers, useSdk, type ExperimentalLiveFileTarget } from "@get-bb/plugin-sdk/app";
 import { compileStreaming } from "../core";
 import { fileOpenTarget, THREAD_STORAGE_PREFIX } from "../core/file-target";
+import { useAnswerComposers } from "./answerSheet";
 import { AppBlock } from "./AppBlock";
-import { LiveUi, RenderFailure, sendThroughComposer } from "./LiveUi";
+import { LiveUi, RenderFailure, type AnswerTarget } from "./LiveUi";
 import { useAssetLoader, useAudioLoader, useImageLoader, useLoadedData, useTextLoader } from "./useLoadedData";
-import { useSuperseded } from "./useSuperseded";
+import { useReplyIndex, useSuperseded } from "./useSuperseded";
 import { useMotionScope } from "./components/motion";
 
 export type FenceLanguage = "ui" | "app";
 
 export interface ThreadActions {
+  /** Posts `text` to the thread as the user's message: only for a thread without a composer on screen to stage answers in. */
   send(threadId: string, text: string): Promise<void>;
   openFile(threadId: string, path: string, line?: number): Promise<boolean>;
 }
 
 /**
- * Send and file-open for any thread on screen. Stable across renders: the
- * composer list changes on every keystroke, so it is read through a ref.
+ * Send and file-open for any thread on screen, and the thread composers
+ * handed to their answer sheets (ui/answerSheet.ts). Stable across renders,
+ * though the composer list changes on every keystroke.
  */
 export function useThreadActions(): ThreadActions {
-  const composers = useRef<readonly PluginComposerApi[]>([]);
-  composers.current = useComposers();
+  useAnswerComposers(useComposers());
   const sdk = useSdk();
   const navigate = useBbNavigate();
   const send = useCallback(
     async (threadId: string, text: string) => {
-      const composer = composers.current.find(
-        (candidate) => candidate.scope.kind === "thread" && candidate.scope.threadId === threadId,
-      );
-      if (composer !== undefined) {
-        await sendThroughComposer(composer, text);
-        return;
-      }
       await sdk.threads.send({ threadId, mode: "queue-if-active", input: [{ type: "text", text, mentions: [] }] });
     },
     [sdk],
@@ -75,6 +70,7 @@ export const Fence = memo(function Fence({
   stateKey,
   threadId,
   messageId,
+  fence,
   actions,
 }: {
   language: FenceLanguage;
@@ -85,10 +81,12 @@ export const Fence = memo(function Fence({
   threadId: string;
   /** The assistant message holding the block: BB's message id, which is also its timeline row id. */
   messageId: string;
+  /** The block's index among the message's blocks of its language. */
+  fence: number;
   actions: ThreadActions;
 }) {
   return language === "app" ? (
-    <AppBlock html={code} ready={complete} />
+    <AppFence code={code} complete={complete} stateKey={stateKey} threadId={threadId} messageId={messageId} fence={fence} actions={actions} />
   ) : (
     <UiFence
       code={code}
@@ -96,17 +94,28 @@ export const Fence = memo(function Fence({
       stateKey={stateKey}
       threadId={threadId}
       messageId={messageId}
+      fence={fence}
       actions={actions}
     />
   );
 });
 
-function UiFence({
+/** Where a block's answers go in its thread (see AnswerTarget), for ```ui blocks and apps alike. */
+function useAnswerTarget(threadId: string, messageId: string, fence: number, actions: ThreadActions): AnswerTarget {
+  const reply = useReplyIndex(threadId, messageId);
+  return useMemo<AnswerTarget>(
+    () => ({ kind: "thread", threadId, messageId, fence, reply, send: (text) => actions.send(threadId, text) }),
+    [threadId, messageId, fence, reply, actions],
+  );
+}
+
+function AppFence({
   code,
   complete,
   stateKey,
   threadId,
   messageId,
+  fence,
   actions,
 }: {
   code: string;
@@ -114,6 +123,30 @@ function UiFence({
   stateKey: string;
   threadId: string;
   messageId: string;
+  fence: number;
+  actions: ThreadActions;
+}) {
+  const answers = useAnswerTarget(threadId, messageId, fence, actions);
+  const superseded = useSuperseded(threadId, messageId);
+  // Null while BB's outline is read: an app's answers stay open until it says.
+  return <AppBlock html={code} ready={complete} stateKey={stateKey} answers={answers} superseded={superseded === true} />;
+}
+
+function UiFence({
+  code,
+  complete,
+  stateKey,
+  threadId,
+  messageId,
+  fence,
+  actions,
+}: {
+  code: string;
+  complete: boolean;
+  stateKey: string;
+  threadId: string;
+  messageId: string;
+  fence: number;
   actions: ThreadActions;
 }) {
   const result = useMemo(() => compileStreaming(code), [code]);
@@ -122,11 +155,11 @@ function UiFence({
   if (result.program !== null) lastGood.current = result;
   const shown = lastGood.current;
   const data = useLoadedData({ threadId }, shown?.program ?? null);
-  const loadImage = useImageLoader({ threadId });
+  const loadImage = useImageLoader({ threadId }, stateKey);
   const readText = useTextLoader({ threadId });
   const loadAudio = useAudioLoader({ threadId });
   const loadAsset = useAssetLoader({ threadId });
-  const send = useCallback((text: string) => actions.send(threadId, text), [actions, threadId]);
+  const answers = useAnswerTarget(threadId, messageId, fence, actions);
   const openFile = useCallback((path: string, line?: number) => actions.openFile(threadId, path, line), [actions, threadId]);
   const superseded = useSuperseded(threadId, messageId);
   const motion = useMotionScope();
@@ -150,7 +183,7 @@ function UiFence({
       source={code}
       stateKey={stateKey}
       data={data}
-      send={send}
+      answers={answers}
       openFile={openFile}
       loadImage={loadImage}
       readText={readText}

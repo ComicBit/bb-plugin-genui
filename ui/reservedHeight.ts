@@ -31,6 +31,11 @@ export class HeightStore {
     return width === null || Math.abs(entry[0] - width) <= WIDTH_TOLERANCE ? entry[1] : null;
   }
 
+  /** The `[width, height]` stored for `key`. */
+  entry(key: string): Entry | null {
+    return this.entries.get(key) ?? null;
+  }
+
   set(key: string, width: number, height: number): void {
     this.entries.delete(key);
     this.entries.set(key, [Math.round(width), Math.round(height)]);
@@ -60,59 +65,83 @@ export class HeightStore {
   }
 }
 
-let shared: HeightStore | null = null;
-let persistTimer: number | undefined;
-
-function heights(): HeightStore {
-  if (shared === null) {
-    let raw: string | null = null;
-    try {
-      raw = localStorage.getItem(STORAGE_KEY);
-    } catch {
-      // Storage unavailable: nothing is remembered across pages.
+/** A HeightStore kept in localStorage under `storageKey`: read on first use, written at most every PERSIST_MS. */
+export function persistedStore(storageKey: string, max = MAX_BLOCKS) {
+  let shared: HeightStore | null = null;
+  let timer: number | undefined;
+  const store = (): HeightStore => {
+    if (shared === null) {
+      let raw: string | null = null;
+      try {
+        raw = localStorage.getItem(storageKey);
+      } catch {
+        // Storage unavailable: nothing is remembered across pages.
+      }
+      shared = HeightStore.read(raw, max);
     }
-    shared = HeightStore.read(raw);
-  }
-  return shared;
+    return shared;
+  };
+  return {
+    store,
+    /** Writes the store out after its next changes. */
+    save(): void {
+      timer ??= window.setTimeout(() => {
+        timer = undefined;
+        try {
+          localStorage.setItem(storageKey, store().serialize());
+        } catch {
+          // Storage full or unavailable: the sizes hold for this page only.
+        }
+      }, PERSIST_MS);
+    },
+  };
 }
 
-function remember(key: string, width: number, height: number): void {
+const blocks = persistedStore(STORAGE_KEY);
+const heights = blocks.store;
+
+/** Records the height block `key` settled at, laid out at `width`; written to localStorage shortly after. */
+export function rememberHeight(key: string, width: number, height: number): void {
   const store = heights();
   if (store.get(key, width) === Math.round(height)) return;
   store.set(key, width, height);
-  persistTimer ??= window.setTimeout(() => {
-    persistTimer = undefined;
-    try {
-      localStorage.setItem(STORAGE_KEY, store.serialize());
-    } catch {
-      // Storage full or unavailable: the heights hold for this page only.
-    }
-  }, PERSIST_MS);
+  blocks.save();
+}
+
+/** The height block `key` last settled at, laid out at about `width`; at any width when `width` is null. */
+export function storedHeight(key: string, width: number | null = null): number | null {
+  return heights().get(key, width);
 }
 
 /**
- * For a block keyed `key` whose files are `loading`: `content` goes on the
+ * For a block keyed `key` whose files or images are `loading`: `content` goes on the
  * element wrapping what it renders (its natural height is what is remembered)
  * and `minHeight` on that element's parent. The reservation ends once the
- * content reaches it, or after RESERVE_MS with nothing left loading.
+ * content reaches it, or after RESERVE_MS with nothing left loading. While
+ * the block is `provisional` (BB hasn't said yet whether its choices stay),
+ * no height is remembered, but the reservation still ends as usual.
  */
-export function useReservedHeight(key: string, loading: boolean) {
+export function useReservedHeight(key: string, loading: boolean, provisional = false) {
   const [reserve, setReserve] = useState<number | null>(() => heights().get(key));
   const reserved = useRef(reserve);
   reserved.current = reserve;
-  const isLoading = useRef(loading);
-  isLoading.current = loading;
+  const unsettled = useRef(loading || provisional);
+  unsettled.current = loading || provisional;
   const [node, setNode] = useState<HTMLDivElement | null>(null);
   const content = useCallback((element: HTMLDivElement | null) => setNode(element), []);
+  const settle = useCallback(
+    (width: number, height: number) => {
+      const held = reserved.current;
+      if (held !== null && height >= held - 1) setReserve(null);
+      // Heights seen while files or images arrive, while the block is provisional or under a reservation are not its own.
+      if (!unsettled.current && (held === null || height >= held - 1)) rememberHeight(key, width, height);
+    },
+    [key],
+  );
 
   useLayoutEffect(() => {
     if (node === null) return;
-    const settle = (width: number, height: number) => {
-      const held = reserved.current;
-      if (held !== null && height >= held - 1) setReserve(null);
-      // Heights seen while files load or under a reservation are not the block's own.
-      if (!isLoading.current && (held === null || height >= held - 1)) remember(key, width, height);
-    };
+
     // Laid out at another width (a narrower pane, a phone), the stored height doesn't apply.
     const width = node.getBoundingClientRect().width;
     if (reserved.current !== null && heights().get(key, width) === null) setReserve(null);
@@ -122,7 +151,15 @@ export function useReservedHeight(key: string, loading: boolean) {
     });
     observer.observe(node);
     return () => observer.disconnect();
-  }, [node, key]);
+  }, [node, key, settle]);
+
+  // Once nothing is left arriving, what shows is the block's own height, whether or not that resized it.
+  const settled = !loading && !provisional;
+  useEffect(() => {
+    if (!settled || node === null) return;
+    const box = node.getBoundingClientRect();
+    settle(box.width, box.height);
+  }, [settled, node, settle]);
 
   // Content that is shorter now never reaches the reservation: drop it, and remember the new height.
   useEffect(() => {
@@ -130,7 +167,7 @@ export function useReservedHeight(key: string, loading: boolean) {
     const timer = window.setTimeout(() => {
       const box = node.getBoundingClientRect();
       setReserve(null);
-      remember(key, box.width, box.height);
+      if (!unsettled.current) rememberHeight(key, box.width, box.height);
     }, RESERVE_MS);
     return () => clearTimeout(timer);
   }, [reserve, loading, node, key]);

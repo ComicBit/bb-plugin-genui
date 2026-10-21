@@ -1,18 +1,23 @@
-// The Chart types beyond bar/line/area/pie: scatter, radar, funnel and
-// heatmap. Same pixel-space drawing, palette, readout and entrance motion as
-// Chart.tsx; every value is reachable by pointer, tap and arrow keys, and a
-// summary carries it to screen readers. Geometry lives in chartMath.ts.
+// The Chart types beyond bar/line/area/pie: scatter, radar, funnel, heatmap,
+// and histogram and box for raw observations. Same pixel-space drawing,
+// palette, readout and entrance motion as Chart.tsx; every value is reachable
+// by pointer, tap and arrow keys, and a summary carries it to screen readers.
+// Geometry lives in chartMath.ts, the statistics in core/distribution.ts.
 import { useId, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { cn } from "@/lib/utils";
 import { ACCENT, formatNumber } from "../values";
+import { boxSummary, EDGES_ERROR, histogram, leftOutNote, readSample, type BoxSummary } from "../../core/distribution";
 import {
   AXIS_TEXT,
+  barPath,
   CHAR_WIDTH,
   ChartPath,
   ChartTooltip,
   clip,
   COMPACT_FORMAT,
   formatValue,
+  GROW,
+  GROW_STAGGER_STEPS,
   mouseLeave,
   NO_DATA,
   SeriesLegend,
@@ -23,6 +28,7 @@ import {
   type Series,
 } from "./chartKit";
 import {
+  countTicks,
   formatShare,
   funnelStages,
   intensity,
@@ -751,6 +757,420 @@ export function HeatmapChart({ labels, series, unit }: { labels: string[]; serie
         />
         <span>{withUnit(COMPACT_FORMAT.format(range.max), unit)}</span>
       </div>
+    </div>
+  );
+}
+
+// ——— Distributions: histogram and box ———
+
+/** An axis number: compact from ten thousand, else up to two decimals, so an edge like 0.25 reads exactly. */
+function axisNumber(value: number, unit: string | null): string {
+  return withUnit(Math.abs(value) >= 10_000 ? COMPACT_FORMAT.format(value) : formatNumber(value), unit);
+}
+
+/** What a distribution chart left out (empty values, values outside the bins), under it. */
+function LeftOut({ note }: { note: string | null }) {
+  return note === null ? null : <p className="text-[11px] text-muted-foreground">{note}</p>;
+}
+
+const HIST_HEIGHT = 168;
+/** Air between neighbouring bins, and between groups inside a bin when they have room for it. */
+const BIN_GAP = 1;
+
+/**
+ * Series are raw values, counted into bins every group shares: the labels'
+ * edges, or automatic ones. Groups stand side by side in each bin.
+ */
+export function HistogramChart({ labels, series, unit }: { labels: string[]; series: Series[]; unit: string | null }) {
+  const [frame, width] = useWidth<HTMLDivElement>();
+  const [active, setActive] = useState<number | null>(null);
+  const samples = series.map((entry) => readSample(entry.name, entry.values));
+  const result = histogram(labels, samples.map((sample) => sample.values));
+  if (result === null) return <ErrorLine message={EDGES_ERROR} />;
+  const note = leftOutNote(
+    samples.reduce((all, sample) => all + sample.dropped, 0),
+    result.outside,
+  );
+  const { edges, counts } = result;
+  const bins = edges.length - 1;
+  const total = counts.flat().reduce((all, count) => all + count, 0);
+  if (bins < 1 || total === 0) {
+    return (
+      <div className="flex min-w-0 flex-col gap-1">
+        {NO_DATA}
+        <LeftOut note={note} />
+      </div>
+    );
+  }
+
+  const ticks = countTicks(Math.max(...counts.flat()));
+  const top = ticks[ticks.length - 1]!;
+  const padLeft = Math.max(...ticks.map((tick) => formatNumber(tick).length)) * CHAR_WIDTH + 10;
+  const plotWidth = Math.max(1, width - padLeft - PAD_RIGHT);
+  const height = PAD_TOP + HIST_HEIGHT + PAD_BOTTOM;
+  const base = PAD_TOP + HIST_HEIGHT;
+  const px = (value: number) => padLeft + ((value - edges[0]!) / (edges[bins]! - edges[0]!)) * plotWidth;
+  const py = (count: number) => PAD_TOP + (1 - count / top) * HIST_HEIGHT;
+  const groups = samples.length;
+  const named = groups > 1;
+  const range = (bin: number) => `${formatNumber(edges[bin]!)}–${formatValue(edges[bin + 1]!, unit)}`;
+
+  // Edge labels left to right, each only where it clears the one before. The
+  // first is drawn from its edge and the last up to it, so they stay inside.
+  const edgeLabels = edges.map((edge) => axisNumber(edge, unit));
+  const shownEdges: number[] = [];
+  let clearFrom = -Infinity;
+  edges.forEach((edge, index) => {
+    const labelWidth = edgeLabels[index]!.length * CHAR_WIDTH;
+    const left = index === 0 ? px(edge) : index === bins ? px(edge) - labelWidth : px(edge) - labelWidth / 2;
+    if (left < clearFrom) return;
+    shownEdges.push(index);
+    clearFrom = left + labelWidth + 8;
+  });
+
+  const summary = `Histogram of ${formatNumber(total)} ${total === 1 ? "value" : "values"} in ${bins} ${bins === 1 ? "bin" : "bins"} from ${formatNumber(edges[0]!)} to ${formatValue(edges[bins]!, unit)}. ${samples
+    .map((sample, group) =>
+      [
+        named ? `${sample.name}:` : "",
+        counts[group]!.flatMap((count, bin) => (count === 0 ? [] : [`${range(bin)} ${count}`])).join(", "),
+      ]
+        .filter(Boolean)
+        .join(" "),
+    )
+    .join("; ")}. Arrow keys read each bin.`;
+
+  const probe = (event: PointerEvent<HTMLDivElement>) => {
+    const [x] = localPoint(event);
+    const bin = edges.findIndex((edge, index) => index < bins && x >= px(edge) && x < px(edges[index + 1]!));
+    if (bin >= 0) setActive(bin);
+    else if (event.pointerType === "mouse") setActive(null);
+  };
+
+  return (
+    <div className="flex min-w-0 flex-col gap-2.5">
+      <SeriesLegend series={series} />
+      <div
+        ref={frame}
+        tabIndex={0}
+        role="group"
+        aria-label={summary}
+        className={PLOT}
+        style={{ height }}
+        onPointerMove={probe}
+        onPointerDown={probe}
+        onPointerLeave={mouseLeave(() => setActive(null))}
+        onBlur={() => setActive(null)}
+        onKeyDown={(event) =>
+          handleKeys(
+            event,
+            (key) => {
+              const next = stepGrid(key, 0, active ?? 0, 1, bins);
+              if (next === null) return false;
+              // The first key press lands on the first bin rather than moving past it.
+              setActive(active === null ? 0 : next[1]);
+              return true;
+            },
+            () => setActive(null),
+          )
+        }
+      >
+        {width === 0 ? null : (
+          <svg width={width} height={height} aria-hidden className="block overflow-visible">
+            {ticks.map((tick, index) => (
+              <g key={`y${tick}`}>
+                <line
+                  x1={padLeft}
+                  x2={width - PAD_RIGHT}
+                  y1={py(tick)}
+                  y2={py(tick)}
+                  stroke="var(--border)"
+                  strokeOpacity={index === 0 ? 1 : 0.55}
+                  strokeDasharray={index === 0 ? undefined : "2 3"}
+                />
+                <text x={padLeft - 10} y={py(tick)} textAnchor="end" dominantBaseline="middle" className={AXIS_TEXT}>
+                  {formatNumber(tick)}
+                </text>
+              </g>
+            ))}
+            {shownEdges.map((index) => (
+              <text
+                key={`x${index}`}
+                x={px(edges[index]!)}
+                y={height - 6}
+                textAnchor={index === 0 ? "start" : index === bins ? "end" : "middle"}
+                className={AXIS_TEXT}
+              >
+                {edgeLabels[index]}
+              </text>
+            ))}
+            {counts.map((own, group) =>
+              own.map((count, bin) => {
+                if (count === 0) return null;
+                const from = px(edges[bin]!) + BIN_GAP / 2;
+                const span = Math.max(1, px(edges[bin + 1]!) - BIN_GAP / 2 - from);
+                const gap = groups > 1 && span / groups > 4 * BIN_GAP ? BIN_GAP : 0;
+                const barWidth = (span - gap * (groups - 1)) / groups;
+                return (
+                  <ChartPath
+                    key={`${group}:${bin}`}
+                    d={barPath(from + group * (barWidth + gap), barWidth, base, py(count))}
+                    fill={series[group]!.color}
+                    opacity={active === null || active === bin ? 1 : 0.35}
+                    // Grows from the baseline, left to right.
+                    entrance={{ ...GROW, delay: Math.min(bin, GROW_STAGGER_STEPS) * 40 }}
+                    style={{ transformBox: "view-box", transformOrigin: `0 ${base}px` }}
+                  />
+                );
+              }),
+            )}
+          </svg>
+        )}
+        {active === null || active >= bins || width === 0 ? null : (
+          <ChartTooltip
+            x={(px(edges[active]!) + px(edges[active + 1]!)) / 2}
+            top={py(Math.max(...counts.map((own) => own[active]!)))}
+            bottom={base}
+            width={width}
+          >
+            <div className="mb-1 font-medium text-foreground">{range(active)}</div>
+            {samples.map((sample, group) => (
+              <TooltipRow
+                key={group}
+                color={named ? series[group]!.color : undefined}
+                name={named ? sample.name : "Count"}
+                value={formatNumber(counts[group]![active]!)}
+              />
+            ))}
+          </ChartTooltip>
+        )}
+      </div>
+      <LeftOut note={note} />
+    </div>
+  );
+}
+
+const BOX_ROW = 36;
+const BOX_HEIGHT = 14;
+const WHISKER_CAP = 8;
+const OUTLIER_RADIUS = 3;
+/** Outliers a readout lists by value before it only counts them. */
+const OUTLIERS_LISTED = 3;
+
+/** A rectangle with rounded corners, as a path so it eases when the quartiles move. */
+function roundedBox(x0: number, x1: number, top: number, bottom: number): string {
+  const r = Math.min(3, (x1 - x0) / 2, (bottom - top) / 2);
+  return `M${x0 + r},${top} H${x1 - r} Q${x1},${top} ${x1},${top + r} V${bottom - r} Q${x1},${bottom} ${x1 - r},${bottom} H${x0 + r} Q${x0},${bottom} ${x0},${bottom - r} V${top + r} Q${x0},${top} ${x0 + r},${top} Z`;
+}
+
+/**
+ * One horizontal box per series of raw values (a single unnamed series takes
+ * its name from the first label): the middle half as the box, the median as
+ * a bar across it, whiskers to the furthest values within 1.5 IQR, outliers
+ * as dots, and each group's n at the right.
+ */
+export function BoxChart({ labels, series, unit }: { labels: string[]; series: Series[]; unit: string | null }) {
+  const [frame, width] = useWidth<HTMLDivElement>();
+  const maskId = useId();
+  const [active, setActive] = useState<number | null>(null);
+  const samples = series.map((entry) => readSample(series.length === 1 && entry.name === "" ? (labels[0] ?? "") : entry.name, entry.values));
+  const boxes = samples.map((sample) => boxSummary(sample.values));
+  const note = leftOutNote(
+    samples.reduce((all, sample) => all + sample.dropped, 0),
+    0,
+  );
+  const present = boxes.filter((box): box is BoxSummary => box !== null);
+  if (present.length === 0) {
+    return (
+      <div className="flex min-w-0 flex-col gap-1">
+        {NO_DATA}
+        <LeftOut note={note} />
+      </div>
+    );
+  }
+
+  const rows = samples.length;
+  const longest = Math.max(...samples.map((sample) => sample.name.length));
+  const padLeft = longest === 0 ? PAD_RIGHT : Math.min(longest * CHAR_WIDTH + 10, width * 0.35);
+  const rowChars = Math.max(3, Math.floor((padLeft - 10) / CHAR_WIDTH));
+  const counts = boxes.map((box) => `n=${formatNumber(box?.n ?? 0)}`);
+  // Room for the n labels, clear of an outlier dot at the plot's right end.
+  const padRight = Math.max(...counts.map((count) => count.length)) * CHAR_WIDTH + 16;
+  const plotWidth = Math.max(1, width - padLeft - padRight);
+  const scale = niceScale(
+    Math.min(...present.map((box) => box.min)),
+    Math.max(...present.map((box) => box.max)),
+    Math.max(2, Math.min(6, Math.floor(plotWidth / 72))),
+  );
+  const plotHeight = rows * BOX_ROW;
+  const height = plotHeight + PAD_BOTTOM;
+  const px = (value: number) => padLeft + ((value - scale.min) / (scale.max - scale.min)) * plotWidth;
+  const cy = (row: number) => row * BOX_ROW + BOX_ROW / 2;
+  const shown = active === null ? null : (boxes[active] ?? null);
+
+  const summary = `Box plot, ${rows} ${rows === 1 ? "group" : "groups"}. ${samples
+    .map((sample, row) => {
+      const box = boxes[row];
+      const name = sample.name || "Values";
+      if (box === null || box === undefined) return `${name}: no values`;
+      return `${name}: n ${box.n}, median ${formatValue(box.median, unit)}, middle half ${formatNumber(box.q1)} to ${formatValue(box.q3, unit)}, whiskers ${formatNumber(box.low)} to ${formatValue(box.high, unit)}, ${box.outliers.length} ${box.outliers.length === 1 ? "outlier" : "outliers"}`;
+    })
+    .join("; ")}. Arrow keys read each group.`;
+
+  const probe = (event: PointerEvent<HTMLDivElement>) => {
+    const [, y] = localPoint(event);
+    const row = Math.floor(y / BOX_ROW);
+    if (row >= 0 && row < rows) setActive(row);
+    else if (event.pointerType === "mouse") setActive(null);
+  };
+
+  return (
+    <div className="flex min-w-0 flex-col gap-2.5">
+      <div
+        ref={frame}
+        tabIndex={0}
+        role="group"
+        aria-label={summary}
+        className={PLOT}
+        style={{ height }}
+        onPointerMove={probe}
+        onPointerDown={probe}
+        onPointerLeave={mouseLeave(() => setActive(null))}
+        onBlur={() => setActive(null)}
+        onKeyDown={(event) =>
+          handleKeys(
+            event,
+            (key) => {
+              const next = stepGrid(key, active ?? 0, 0, rows, 1);
+              if (next === null) return false;
+              // The first key press lands on the first group rather than moving past it.
+              setActive(active === null ? 0 : next[0]);
+              return true;
+            },
+            () => setActive(null),
+          )
+        }
+      >
+        {width === 0 ? null : (
+          <svg width={width} height={height} aria-hidden className="block overflow-visible">
+            <defs>
+              <SweepMask id={maskId} width={width} height={plotHeight} />
+            </defs>
+            {scale.ticks.map((tick, index) => (
+              <g key={tick}>
+                <line
+                  x1={px(tick)}
+                  x2={px(tick)}
+                  y1={0}
+                  y2={plotHeight}
+                  stroke="var(--border)"
+                  strokeOpacity={index === 0 ? 1 : 0.55}
+                  strokeDasharray={index === 0 ? undefined : "2 3"}
+                />
+                <text
+                  x={px(tick)}
+                  y={height - 6}
+                  textAnchor={index === scale.ticks.length - 1 ? "end" : "middle"}
+                  className={AXIS_TEXT}
+                >
+                  {axisNumber(tick, unit)}
+                </text>
+              </g>
+            ))}
+            {samples.map((sample, row) => (
+              <g key={row}>
+                {sample.name === "" ? null : (
+                  <text
+                    x={padLeft - 10}
+                    y={cy(row)}
+                    textAnchor="end"
+                    dominantBaseline="middle"
+                    className={cn("text-[11px]", active === row ? "fill-foreground" : "fill-muted-foreground")}
+                  >
+                    {clip(sample.name, rowChars)}
+                  </text>
+                )}
+                <text x={width} y={cy(row)} textAnchor="end" dominantBaseline="middle" className={AXIS_TEXT}>
+                  {counts[row]}
+                </text>
+              </g>
+            ))}
+            <g mask={`url(#${maskId})`}>
+              {boxes.map((box, row) => {
+                if (box === null) return null;
+                const color = series[row]!.color;
+                const y = cy(row);
+                const top = y - BOX_HEIGHT / 2;
+                const bottom = y + BOX_HEIGHT / 2;
+                const caps = `M${px(box.low)},${y - WHISKER_CAP / 2} V${y + WHISKER_CAP / 2} M${px(box.high)},${y - WHISKER_CAP / 2} V${y + WHISKER_CAP / 2}`;
+                return (
+                  <g
+                    key={row}
+                    opacity={active === null || active === row ? 1 : 0.35}
+                    className="transition-opacity duration-150 motion-reduce:transition-none"
+                  >
+                    <ChartPath
+                      d={`M${px(box.low)},${y} H${px(box.q1)} M${px(box.q3)},${y} H${px(box.high)} ${caps}`}
+                      fill="none"
+                      stroke={color}
+                      strokeWidth={1.5}
+                      strokeLinecap="round"
+                      entrance={FADE}
+                    />
+                    <ChartPath
+                      d={roundedBox(px(box.q1), Math.max(px(box.q3), px(box.q1) + 1), top, bottom)}
+                      fill={color}
+                      fillOpacity={0.18}
+                      stroke={color}
+                      strokeWidth={1.5}
+                      entrance={FADE}
+                    />
+                    <ChartPath
+                      d={`M${px(box.median)},${top} V${bottom}`}
+                      fill="none"
+                      stroke={color}
+                      strokeWidth={2.5}
+                      strokeLinecap="round"
+                      entrance={FADE}
+                    />
+                    {box.outliers.map((value, index) => (
+                      <circle
+                        key={index}
+                        cx={px(value)}
+                        cy={y}
+                        r={OUTLIER_RADIUS}
+                        fill="var(--background)"
+                        stroke={color}
+                        strokeWidth={1.5}
+                      />
+                    ))}
+                  </g>
+                );
+              })}
+            </g>
+          </svg>
+        )}
+        {shown === null || active === null || width === 0 ? null : (
+          <ChartTooltip x={px(shown.median)} top={cy(active) - BOX_HEIGHT / 2} bottom={cy(active) + BOX_HEIGHT / 2} width={width}>
+            <div className="mb-1 font-medium text-foreground">{samples[active]!.name || "Values"}</div>
+            <TooltipRow name="n" value={formatNumber(shown.n)} />
+            <TooltipRow name="Min" value={formatValue(shown.min, unit)} />
+            <TooltipRow name="Q1" value={formatValue(shown.q1, unit)} />
+            <TooltipRow name="Median" value={formatValue(shown.median, unit)} />
+            <TooltipRow name="Q3" value={formatValue(shown.q3, unit)} />
+            <TooltipRow name="Max" value={formatValue(shown.max, unit)} />
+            {shown.outliers.length === 0 ? null : (
+              <TooltipRow
+                name={`${shown.outliers.length} ${shown.outliers.length === 1 ? "outlier" : "outliers"}`}
+                value={`${shown.outliers
+                  .slice(0, OUTLIERS_LISTED)
+                  .map((value) => formatValue(value, unit))
+                  .join(", ")}${shown.outliers.length > OUTLIERS_LISTED ? ", …" : ""}`}
+              />
+            )}
+          </ChartTooltip>
+        )}
+      </div>
+      <LeftOut note={note} />
     </div>
   );
 }

@@ -4,11 +4,12 @@
 // plugin's gallery/ folder) and fetches https images through its
 // address-checked proxy (web/lookups.ts), so every surface shows them the
 // same way whatever its CSP, and the webLookups setting governs them.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRpc } from "@get-bb/plugin-sdk/app";
 import { collectLoads, dataKey, type DataRequest, type LoadedData, type Program } from "../core";
 import type { rpcContract } from "../server";
-import type { AssetBytes, ImageUrl, TextFile } from "./runtime";
+import { persistedStore } from "./reservedHeight";
+import type { AssetBytes, ImageLoader, ImageSize, ImageUrl, TextFile } from "./runtime";
 
 /** Where a spec's files come from: a thread's workspace and storage, or the gallery. */
 export type FileScope = { readonly threadId: string } | "gallery";
@@ -109,29 +110,94 @@ export function useLoadedData(scope: FileScope, program: Program | null): Readon
 }
 
 /**
- * Reads images (thread or gallery files, https URLs) as data URLs. Each src
- * is fetched once per block, so tabs and re-renders that remount an Image
- * don't refetch it; failures are not kept, so a file written later still loads.
+ * Images already read in this page, by block and src, as the data URLs the
+ * backend returned: a block BB's timeline remounts (scrolled back to, or its
+ * thread opened again) shows them on its first frame instead of a
+ * placeholder that grows when they arrive, and tabs and re-renders don't
+ * refetch them. Per block, so a later reply showing a file rewritten at the
+ * same path reads it afresh, while an old reply keeps what it showed.
+ * Failures are not kept, so a file written later still loads, nor pictures
+ * the browser couldn't decode (`forget`). Bounded by
+ * the characters held (a data URL can be several MB), most recently used kept.
  */
-export function useImageLoader(scope: FileScope): (src: string) => Promise<ImageUrl> {
+const IMAGES = new Map<string, { readonly pending: Promise<ImageUrl>; read: ImageUrl | null }>();
+const MAX_IMAGE_CHARS = 64 * 1024 * 1024;
+let imageChars = 0;
+
+function trimImages(): void {
+  for (const [key, entry] of IMAGES) {
+    if (imageChars <= MAX_IMAGE_CHARS || IMAGES.size <= 1) return;
+    // Still being read: nothing held yet.
+    if (entry.read?.ok !== true) continue;
+    IMAGES.delete(key);
+    imageChars -= entry.read.url.length;
+  }
+}
+
+/** Natural sizes pictures decoded at, by block and src, kept across pages (reservedHeight.ts). */
+const imageSizes = persistedStore("bb.genui.image-sizes", 1000);
+
+/**
+ * Reads images (thread or gallery files, https URLs) as data URLs, once per
+ * page for the block `block` (its state key; the gallery shares one), and
+ * remembers their natural sizes: with both, an Image remounted in this page
+ * shows its picture at once, and one opened on a fresh page holds its final
+ * size while the picture is read (see `ImageLoader`).
+ */
+export function useImageLoader(scope: FileScope, block: string | null = null): ImageLoader {
   const loaders = useLoaders(scope);
-  const images = useRef(new Map<string, Promise<ImageUrl>>());
-  return useCallback(
-    (src: string) => {
-      const cached = images.current.get(src);
-      if (cached !== undefined) return cached;
+  const scopeKey = `${scope === "gallery" ? "gallery" : scope.threadId}|${block ?? ""}`;
+  return useMemo(() => {
+    const load = (src: string): Promise<ImageUrl> => {
+      const key = `${scopeKey}|${src}`;
+      const cached = IMAGES.get(key);
+      if (cached !== undefined) {
+        // Most recently used last, so the oldest unused image goes first.
+        IMAGES.delete(key);
+        IMAGES.set(key, cached);
+        return cached.pending;
+      }
       const pending = loaders.image(src).then(
         (loaded): ImageUrl => (loaded.ok ? { ok: true, url: loaded.dataUrl } : loaded),
         (cause: unknown): ImageUrl => ({ ok: false, error: cause instanceof Error ? cause.message : String(cause) }),
       );
-      images.current.set(src, pending);
+      const entry: { readonly pending: Promise<ImageUrl>; read: ImageUrl | null } = { pending, read: null };
+      IMAGES.set(key, entry);
       void pending.then((image) => {
-        if (!image.ok) images.current.delete(src);
+        if (IMAGES.get(key) !== entry) return;
+        if (!image.ok) {
+          IMAGES.delete(key);
+          return;
+        }
+        entry.read = image;
+        imageChars += image.url.length;
+        trimImages();
       });
       return pending;
-    },
-    [loaders],
-  );
+    };
+    return Object.assign(load, {
+      peek: (src: string) => IMAGES.get(`${scopeKey}|${src}`)?.read ?? null,
+      size: (src: string): ImageSize | null => {
+        const entry = imageSizes.store().entry(`${scopeKey}|${src}`);
+        return entry === null ? null : { width: entry[0], height: entry[1] };
+      },
+      rememberSize: (src: string, { width, height }: ImageSize) => {
+        const key = `${scopeKey}|${src}`;
+        const store = imageSizes.store();
+        const entry = store.entry(key);
+        if (entry !== null && entry[0] === Math.round(width) && entry[1] === Math.round(height)) return;
+        store.set(key, width, height);
+        imageSizes.save();
+      },
+      forget: (src: string) => {
+        const key = `${scopeKey}|${src}`;
+        const entry = IMAGES.get(key);
+        if (entry === undefined) return;
+        IMAGES.delete(key);
+        if (entry.read?.ok === true) imageChars -= entry.read.url.length;
+      },
+    });
+  }, [loaders, scopeKey]);
 }
 
 /**

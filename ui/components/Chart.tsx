@@ -4,18 +4,21 @@
 // values when the UI's state changes and the rest snap. On first mount lines
 // draw themselves, areas fade in, bars grow from the baseline and donuts sweep
 // round. The arithmetic (stacking, slices, rounding) lives in chartMath.ts,
-// the shared drawing pieces in chartKit.tsx, and the scatter, radar, funnel
-// and heatmap types in chartTypes.tsx.
+// the shared drawing pieces in chartKit.tsx, and the scatter, radar, funnel,
+// heatmap, histogram and box types in chartTypes.tsx.
 import { useId, useState } from "react";
 import { cn } from "@/lib/utils";
 import { finiteNumber, list, optionalText, text, tone, type Props } from "../values";
 import {
+  barPath,
   CHAR_WIDTH,
   ChartPath,
   COMPACT_FORMAT,
   DRAW,
   EASE,
   formatValue,
+  GROW,
+  GROW_STAGGER_STEPS,
   Marker,
   mouseLeave,
   NO_DATA,
@@ -29,7 +32,7 @@ import {
   type Series,
 } from "./chartKit";
 import { niceStep, percentages, pieSlices, stackSeries, trendLabel, type Segment } from "./chartMath";
-import { FunnelChart, HeatmapChart, RadarChart, ScatterChart } from "./chartTypes";
+import { BoxChart, FunnelChart, HeatmapChart, HistogramChart, RadarChart, ScatterChart } from "./chartTypes";
 import { CHART_DRAW_MS, FADE, type Entrance } from "./motion";
 
 const PLOT_HEIGHT = 168;
@@ -40,12 +43,6 @@ const PAD_RIGHT = 4;
 const MIN_LABEL_SPACING = 48;
 const MAX_BAR_WIDTH = 28;
 const AREA: Entrance = { keyframes: FADE.keyframes, duration: CHART_DRAW_MS };
-const GROW: Entrance = {
-  keyframes: [{ transform: "scaleY(0)" }, { transform: "scaleY(1)" }],
-  duration: CHART_DRAW_MS,
-};
-/** Bars after this many grow together. */
-const GROW_STAGGER_STEPS = 10;
 
 type Point = readonly [number, number];
 
@@ -73,16 +70,6 @@ function smoothPath(points: readonly Point[]): string {
   return d;
 }
 
-/** A bar with rounded top corners (bottom corners for negative bars); square when not `rounded`. */
-function barPath(x: number, width: number, from: number, to: number, rounded = true): string {
-  const height = Math.abs(to - from);
-  const r = rounded ? Math.min(3, width / 2, height) : 0;
-  if (to <= from) {
-    return `M${x},${from} V${to + r} Q${x},${to} ${x + r},${to} H${x + width - r} Q${x + width},${to} ${x + width},${to + r} V${from} Z`;
-  }
-  return `M${x},${from} V${to - r} Q${x},${to} ${x + r},${to} H${x + width - r} Q${x + width},${to} ${x + width},${to - r} V${from} Z`;
-}
-
 /** Points from the top, clockwise; `from`/`to` in radians. A whole turn is two half arcs. */
 function arcPath(c: number, r: number, from: number, to: number): string {
   const at = (angle: number) => `${c + r * Math.sin(angle)},${c - r * Math.cos(angle)}`;
@@ -92,7 +79,7 @@ function arcPath(c: number, r: number, from: number, to: number): string {
   return `M${at(from)} A${r},${r} 0 ${to - from > Math.PI ? 1 : 0} 1 ${at(to)}`;
 }
 
-const CHART_TYPES = ["bar", "line", "area", "pie", "scatter", "radar", "funnel", "heatmap"] as const;
+const CHART_TYPES = ["bar", "line", "area", "pie", "scatter", "radar", "funnel", "heatmap", "histogram", "box"] as const;
 type ChartType = (typeof CHART_TYPES)[number];
 
 export function Chart({ props }: { props: Props }) {
@@ -113,6 +100,10 @@ export function Chart({ props }: { props: Props }) {
       return <RadarChart labels={labels} series={series} unit={unit} />;
     case "heatmap":
       return <HeatmapChart labels={labels} series={series} unit={unit} />;
+    case "histogram":
+      return <HistogramChart labels={labels} series={series} unit={unit} />;
+    case "box":
+      return <BoxChart labels={labels} series={series} unit={unit} />;
     default: {
       // Stacking only means something for piles: bars and areas with several series.
       const stacked = props.stacked === true && type !== "line" && series.length > 1;

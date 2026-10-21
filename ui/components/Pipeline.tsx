@@ -24,7 +24,7 @@ import {
   type PipelineStep,
 } from "../../core/pipeline";
 import type { Action } from "../../core/types";
-import { CardDepthContext } from "../runtime";
+import { CardDepthContext, NodeKeyContext } from "../runtime";
 import { formatNumber, TONE_DOT, TONE_TEXT, type Props, type Tone } from "../values";
 import { ErrorLine } from "./display";
 import { Button, ButtonGroup, FOCUS_RING } from "./inputs";
@@ -590,6 +590,7 @@ function useOpened(run: PipelineRun | null): Opened {
 
 export function Pipeline({ props }: { props: Props }) {
   const depth = useContext(CardDepthContext);
+  const question = `${useContext(NodeKeyContext)}/actions`;
   const result = useMemo(() => readPipeline(props.run), [props.run]);
   const opened = useOpened(result.ok ? result.run : null);
   if (!result.ok) return <ErrorLine message={result.error} />;
@@ -612,7 +613,7 @@ export function Pipeline({ props }: { props: Props }) {
       ) : (
         <Stages run={run} opened={opened} />
       )}
-      {buttons.length === 0 ? null : <ButtonGroup buttons={buttons} />}
+      {buttons.length === 0 ? null : <ButtonGroup buttons={buttons} question={question} />}
     </div>
   );
   if (depth > 0) return <div className="min-w-0 text-sm text-foreground">{body}</div>;

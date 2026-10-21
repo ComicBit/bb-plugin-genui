@@ -35,7 +35,7 @@ vi.mock("@get-bb/plugin-sdk/app", async (importOriginal) => ({
   Markdown: ({ content }: { content: string }) => <p>{content}</p>,
   experimental_Icon: () => <span aria-hidden="true" />,
 }));
-vi.mock("./useSuperseded", () => ({ useSuperseded: () => false }));
+vi.mock("./useSuperseded", () => ({ useSuperseded: () => false, useReplyIndex: () => null }));
 
 let container: HTMLDivElement;
 let root: Root;
@@ -62,13 +62,16 @@ afterEach(() => {
 });
 
 describe("SlotFence completion", () => {
-  it("starts a sandbox only after the app fence closes, without restarting it on a repeated closed update", () => {
+  it("runs the app only after its fence closes, without restarting it on a repeated closed update", () => {
     render("app", "streaming", html);
-    expect(container.querySelector("iframe")).toBeNull();
+    // While it streams, only the preview frame, which never runs the model's scripts.
+    expect(container.querySelector('iframe[title="App"]')).toBeNull();
+    expect(container.querySelector('iframe[title="App preview"]')?.getAttribute("sandbox")).toBe("allow-scripts");
     expect(container.querySelector('[role="status"]')).not.toBeNull();
     render("app", "closed", html);
     const frame = container.querySelector("iframe");
-    expect(frame?.getAttribute("sandbox")).toBe("allow-scripts");
+    expect(frame?.title).toBe("App");
+    expect(frame?.getAttribute("sandbox")).toBe("allow-scripts allow-forms");
     expect(container.querySelector('[role="status"]')).toBeNull();
     render("app", "closed", html);
     expect(container.querySelector("iframe")).toBe(frame);

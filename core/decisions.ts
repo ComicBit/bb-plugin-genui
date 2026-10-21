@@ -208,22 +208,18 @@ export function planTotal(steps: readonly PlanStep[], included: readonly boolean
 }
 
 /**
- * The one message approving the plan sends:
- * - all steps checked, no note: "Go ahead with the plan."
+ * What approving the plan answers:
+ * - all steps checked: "Go ahead with the plan."
  * - some unchecked: "Go ahead with steps 1, 2 and 4. Skip 3 (Migrate the old rows)."
- * - a note adds " Note: …"; nothing checked with a note: "Don't start the plan yet. Note: …"
- * Empty when nothing is checked and there is no note (nothing to send).
+ * Empty when nothing is checked (nothing to approve).
  */
-export function planMessage(steps: readonly PlanStep[], checked: readonly boolean[], note: string): string {
-  const trimmed = note.trim();
-  const noteText = trimmed === "" ? "" : ` Note: ${trimmed}`;
+export function planMessage(steps: readonly PlanStep[], checked: readonly boolean[]): string {
   const kept = steps.flatMap((_, index) => (checked[index] !== false ? [index + 1] : []));
   const skipped = steps.flatMap((step, index) => (checked[index] === false ? [{ number: index + 1, title: step.title }] : []));
-  if (kept.length === 0) return trimmed === "" ? "" : `Don't start the plan yet.${noteText}`;
-  if (skipped.length === 0) return `Go ahead with the plan.${noteText}`;
+  if (kept.length === 0) return "";
+  if (skipped.length === 0) return "Go ahead with the plan.";
   const go = `Go ahead with ${kept.length === 1 ? "step" : "steps"} ${numberList(kept)}.`;
-  const skip = `Skip ${joinAnd(skipped.map((step) => `${step.number} (${step.title})`))}.`;
-  return `${go} ${skip}${noteText}`;
+  return `${go} Skip ${joinAnd(skipped.map((step) => `${step.number} (${step.title})`))}.`;
 }
 
 // ---------------------------------------------------------------------------

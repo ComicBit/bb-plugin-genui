@@ -17,6 +17,7 @@ export {
   specToMarkdown,
   toMarkdown,
   toMarkdownWithImages,
+  wikiPhotos,
   type SearchedImage,
 } from "./markdown";
 export { MAX_PROBES, probeInteractions, type ProbeReport } from "./probe";

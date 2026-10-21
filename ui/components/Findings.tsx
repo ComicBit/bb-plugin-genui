@@ -6,8 +6,8 @@
 // ones. A finding opens to its detail, the reviewer's evidence, where it
 // stands, the code at its line with the column underlined, the fix (a diff
 // where the tool gave edits) and its rule's docs; "Fix this" and "Fix all"
-// send the agent the work still to fix. Long reports page in.
-import { useContext, useMemo, useState, type ReactNode } from "react";
+// put the work still to fix in the user's message. Long reports page in.
+import { useContext, useMemo, type ReactNode } from "react";
 import { Markdown, UrlLink } from "@get-bb/plugin-sdk/app";
 import { Button as BaseButton } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
@@ -40,11 +40,10 @@ import {
   type VerdictTone,
 } from "../../core/findings";
 import { commonDirectory, displayPath } from "../../core/test-results";
-import type { Action } from "../../core/types";
-import { CardDepthContext, useUiRuntime, type TextFile } from "../runtime";
+import { CardDepthContext, NodeKeyContext, sentFor, useAnswers, useUiRuntime, type TextFile } from "../runtime";
 import { propsKey, usePersistedState } from "../usePersistedState";
 import { formatNumber, optionalText, TONE_DOT, TONE_PILL, TONE_TEXT, type Props, type Tone } from "../values";
-import { actionIntent } from "./action-logic";
+import { actionIntent, sendEffect } from "./action-logic";
 import {
   acceptStrings,
   Chevron,
@@ -203,35 +202,37 @@ function Summary({
 }
 
 // ---------------------------------------------------------------------------
-// Sending
+// Asking for a fix
 
-/** A Send button that reads "Sent" once this block sent its message. */
+/**
+ * A toggle that puts `message` in the user's message (its own question:
+ * press again to take it out); it reads "Sent" once sent. Like a link, it
+ * stays usable in an older reply.
+ */
 function SendButton({ message, label, icon, primary = false }: { message: string; label: string; icon: string; primary?: boolean }) {
-  const { run, answer } = useUiRuntime();
-  const [running, setRunning] = useState(false);
-  const sent = answer === message;
-  const send: Action = { kind: "action", type: "send", text: message };
+  const { staged, sent, target, stage } = useAnswers();
+  const question = `${useContext(NodeKeyContext)}/${propsKey(message)}`;
+  const answered = sentFor(sent, question, (text) => text === message) !== null;
+  const pressed = staged.has(question);
+  const { hint } = actionIntent([{ kind: "action", type: "send", text: message }], { send: sendEffect(target, true, pressed) });
   return (
-    <ActionHint hint={actionIntent([send]).hint}>
+    <ActionHint hint={hint}>
       <BaseButton
         type="button"
         size="sm"
-        variant={primary ? "default" : "outline"}
-        disabled={running}
-        aria-busy={running || undefined}
-        onClick={async () => {
-          setRunning(true);
-          try {
-            await run([send]);
-          } finally {
-            setRunning(false);
-          }
-        }}
-        className={cn("h-7 w-fit max-w-full gap-1.5 px-2.5 text-xs", !primary && "bg-background text-foreground")}
+        variant={primary && !pressed ? "default" : "outline"}
+        data-genui-question={question}
+        aria-pressed={target === "direct" ? undefined : pressed}
+        onClick={() => void stage(question, pressed ? null : { text: message, selection: true })}
+        className={cn(
+          "h-7 w-fit max-w-full gap-1.5 px-2.5 text-xs",
+          (!primary || pressed) && "bg-background text-foreground",
+          pressed && "border-transparent bg-surface-recessed ring-2 ring-[var(--color-timeline-accent,var(--primary))] ring-offset-1 ring-offset-background",
+        )}
       >
-        <Icon name={sent ? "Check" : icon} aria-hidden className="size-3.5 shrink-0" />
-        <span className="truncate">{sent ? "Sent" : label}</span>
-        {sent ? null : <ActionGlyph name="Sent" />}
+        <Icon name={answered || pressed ? "Check" : icon} aria-hidden className="size-3.5 shrink-0" />
+        <span className="truncate">{pressed ? `${label}: in your message` : answered ? "Sent" : label}</span>
+        {answered && !pressed ? null : <ActionGlyph name="Sent" />}
       </BaseButton>
     </ActionHint>
   );

@@ -19,6 +19,8 @@ import {
 import { formatAmount as perfAmount, formatBytes, formatDelta, formatMs, formatPercent as formatChange, formatShare } from "./perf-units";
 import { readTreemap, type TreeNode } from "./treemap";
 import { readWaterfall, type Span } from "./waterfall";
+import { boxSummary, EDGES_ERROR, histogram, leftOutNote, readSample } from "./distribution";
+import { groupByDay, readPlaces } from "./map";
 import { coverageTone, formatPercent, headline, mostUncovered, percent, rangeLabel, readCoverage } from "./coverage";
 import {
   countSeverities,
@@ -130,6 +132,7 @@ import {
   type Fact as ProvenanceFact,
 } from "./provenance";
 import { readScene, type Shape } from "./scene";
+import { sameCaption, sourceCaption, sourceFileLabel, type SourceCaption } from "./source";
 import type { UiNode, Value } from "./types";
 
 const TONE_DOTS: Record<string, string> = { good: "🟢", warn: "🟠", bad: "🔴", info: "🔵", neutral: "⚪" };
@@ -191,20 +194,27 @@ function blocks(nodes: readonly UiNode[], row: boolean): string[] {
   const out: string[] = [];
   let previous: UiNode["type"] | undefined;
   let icon = "";
+  /** The run of Metrics the last line of a Row holds, rewritten as it grows so a shared source is named once. */
+  let metrics: { readonly nodes: UiNode[]; readonly at: number; readonly prefix: string } | null = null;
   for (const node of nodes) {
     if (node.type === "Icon") {
       if (icon !== "") out.push(icon);
       icon = block(node);
-    } else if (node.type === previous && (node.type === "Button" || (row && node.type === "Metric"))) {
-      out[out.length - 1] += ` · ${node.type === "Button" ? buttonLabel(node) : block(node)}`;
+    } else if (row && node.type === "Metric" && previous === "Metric" && metrics !== null) {
+      metrics.nodes.push(node);
+      out[metrics.at] = metrics.prefix + metricRun(metrics.nodes);
+    } else if (node.type === previous && node.type === "Button") {
+      out[out.length - 1] += ` · ${buttonLabel(node)}`;
     } else {
       const text = block(node);
-      if (icon !== "" && text !== "" && !text.includes("\n") && !/^[|>#-]/.test(text)) {
+      const prefixed = icon !== "" && text !== "" && !text.includes("\n") && !/^[|>#-]/.test(text);
+      if (prefixed) {
         out.push(`${icon} ${text}`);
       } else {
         if (icon !== "") out.push(icon);
         out.push(text);
       }
+      if (row && node.type === "Metric") metrics = { nodes: [node], at: out.length - 1, prefix: prefixed ? `${icon} ` : "" };
       icon = "";
     }
     previous = node.type;
@@ -213,12 +223,28 @@ function blocks(nodes: readonly UiNode[], row: boolean): string[] {
   return out;
 }
 
+/** `Source: …` for a caption: the text as written, a URL as a link, loaded files by name. */
+function sourceText(caption: SourceCaption): string {
+  if (caption.kind === "text") return `Source: ${caption.text}`;
+  if (caption.kind === "url") return `Source: ${link(caption.label, caption.url)}`;
+  return `Source: ${caption.paths.map((path) => `\`${sourceFileLabel(path).replace(/`/g, "'")}\``).join(", ")}`;
+}
+
+/** Metrics side by side, `Label **value** — Source: …`; the source once at the end when they all share it. */
+function metricRun(nodes: readonly UiNode[]): string {
+  const captions = nodes.map((node) => sourceCaption(node.props));
+  const after = (text: string, caption: SourceCaption | null) => (caption === null ? text : `${text} — ${sourceText(caption)}`);
+  if (captions.every((caption) => sameCaption(caption, captions[0]))) return after(nodes.map(blockBody).join(" · "), captions[0]);
+  return nodes.map((node, index) => after(blockBody(node), captions[index])).join(" · ");
+}
+
 /** A value as text on one logical line: components in block form, lists comma-separated. */
 function inline(value: Value | undefined): string {
   if (value === undefined || value === null) return "";
   if (typeof value !== "object") return String(value);
   if (Array.isArray(value)) return value.map(inline).join(", ");
-  if (hasKind(value, "node")) return value.type === "Button" ? buttonLabel(value) : block(value);
+  // A component inside a table cell or a value has no source line of its own; the table's says it.
+  if (hasKind(value, "node")) return value.type === "Button" ? buttonLabel(value) : blockBody(value);
   if (hasKind(value, "binding")) return inline(value.value);
   if (hasKind(value, "action")) return "";
   return Object.entries(value)
@@ -357,6 +383,9 @@ function wholeShare(part: number, sum: number): string {
   return share > 0 && share < 0.005 ? "<1%" : `${Math.round(share * 100)}%`;
 }
 
+/** Outliers a box row lists before it only counts the rest. */
+const MAX_OUTLIERS = 8;
+
 /** A stage-to-stage rate as on screen: whole from 10%, one decimal below, `<0.1%` for slivers. */
 function conversion(ratio: number): string {
   const percent = ratio * 100;
@@ -417,7 +446,15 @@ function calendarMarkdown(label: string, days: Value | undefined): string {
   ]);
 }
 
+/** A node's markdown; a Table, Chart or Metric says where its numbers come from. */
 function block(node: UiNode): string {
+  if (node.type === "Metric") return metricRun([node]);
+  if (node.type !== "Table" && node.type !== "Chart") return blockBody(node);
+  const caption = sourceCaption(node.props);
+  return paragraphs([blockBody(node), caption === null ? "" : sourceText(caption)]);
+}
+
+function blockBody(node: UiNode): string {
   const props = node.props;
   switch (node.type) {
     case "Card": {
@@ -479,9 +516,38 @@ function block(node: UiNode): string {
       const named: [string, readonly Value[]][] = Array.isArray(series)
         ? [["Value", series]]
         : isPlainObject(series)
-          ? Object.entries(series).map(([name, values]) => [name, list(values)])
+          ? Object.entries(series).map(([name, values]) => [name, list(fields(values, "values").values)])
           : [];
       const labels = list(props.labels);
+      if (props.type === "histogram" || props.type === "box") {
+        const samples = named.map(([name, values]) => readSample(name, values));
+        const dropped = samples.reduce((all, sample) => all + sample.dropped, 0);
+        let shown: string;
+        let note: string | null;
+        if (props.type === "box") {
+          // One row per group: its five-number summary and what lies beyond the whiskers.
+          const rows = samples.map((sample) => {
+            const name = Array.isArray(series) ? inline(labels[0]) || sample.name : sample.name;
+            const box = boxSummary(sample.values);
+            if (box === null) return [name, 0];
+            const outliers = box.outliers.slice(0, MAX_OUTLIERS).join(", ");
+            const more = box.outliers.length - MAX_OUTLIERS;
+            return [name, box.n, box.min, box.q1, box.median, box.q3, box.max, more > 0 ? `${outliers} and ${more} more` : outliers];
+          });
+          // The group column's header carries the unit every value column is in.
+          shown = table([unit === "" ? "" : `(${unit})`, "n", "min", "Q1", "median", "Q3", "max", "outliers"], rows);
+          note = leftOutNote(dropped, 0);
+        } else {
+          const bins = histogram(labels, samples.map((sample) => sample.values));
+          if (bins === null) return `_${EDGES_ERROR}_`;
+          shown = table(
+            [withUnit("Range"), ...(Array.isArray(series) ? ["Count"] : samples.map((sample) => sample.name))],
+            bins.edges.slice(1).map((to, index) => [`${bins.edges[index]}–${to}`, ...bins.counts.map((counts) => counts[index]!)]),
+          );
+          note = leftOutNote(dropped, bins.outside);
+        }
+        return paragraphs([shown, note === null ? "" : `_${note}_`]);
+      }
       if (props.type === "pie") {
         // A pie has one series; its slices are shares of the positive total.
         const [name, values] = named[0] ?? ["Value", []];
@@ -636,7 +702,7 @@ function block(node: UiNode): string {
     case "Button":
       return `Options: ${buttonLabel(node)}`;
     case "Form":
-      return paragraphs([...blocks(children(props.children), false), `Submit: ${inline(props.submit).trim() || "Send"}`]);
+      return paragraphs(blocks(children(props.children), false));
     case "Timer": {
       const seconds = props.seconds;
       return `⏱ ${labelled(inline(props.label), finite(seconds) && seconds > 0 ? `${clock(seconds)} countdown` : "stopwatch")}`;
@@ -841,7 +907,7 @@ function block(node: UiNode): string {
     case "Json":
       return jsonMarkdown(props.value ?? null, inline(props.label));
     case "Plan":
-      return planMarkdown(props.steps, inline(props.submit));
+      return planMarkdown(props.steps);
     case "Decision":
       return decisionMarkdown(props.options, props.criteria);
     case "Estimate":
@@ -958,44 +1024,82 @@ export interface SearchedImage {
 }
 
 /**
- * The image searches of the rendering in progress, by query. block() is
- * synchronous, so toMarkdownWithImages can hold them here for one call.
+ * The image searches and Wikipedia photos of the rendering in progress, by
+ * query and by article title. block() is synchronous, so toMarkdownWithImages
+ * can hold them here for one call.
  */
 let searched: ReadonlyMap<string, SearchedImage | null> = new Map();
+let wikiFound: ReadonlyMap<string, SearchedImage | null> = new Map();
 
-/** toMarkdown with ImageSearch and Gallery `{query}` items shown as the photos `images` found for them (see imageSearches). */
-export function toMarkdownWithImages(roots: readonly UiNode[], images: ReadonlyMap<string, SearchedImage | null>): string {
+/**
+ * toMarkdown with ImageSearch and Gallery `{query}` items shown as the photos
+ * `images` found for them (see imageSearches), and Map places as the photos
+ * `photos` found for their Wikipedia articles (see wikiPhotos).
+ */
+export function toMarkdownWithImages(
+  roots: readonly UiNode[],
+  images: ReadonlyMap<string, SearchedImage | null>,
+  photos: ReadonlyMap<string, SearchedImage | null> = new Map(),
+): string {
   searched = images;
+  wikiFound = photos;
   try {
     return toMarkdown(roots);
   } finally {
     searched = new Map();
+    wikiFound = new Map();
   }
 }
 
-/** The image searches in evaluated nodes (ImageSearch queries, Gallery `{query}` items), in order, without repeats. */
-export function imageSearches(roots: readonly UiNode[]): string[] {
-  const queries = new Set<string>();
+/** Calls `found` for every node in evaluated `roots`, children and nodes inside props included. */
+function eachNode(roots: readonly UiNode[], found: (node: UiNode) => void): void {
   const visit = (value: Value | undefined): void => {
     if (value === undefined || value === null || typeof value !== "object") return;
     if (Array.isArray(value)) {
       value.forEach(visit);
     } else if (hasKind(value, "node")) {
-      if (value.type === "ImageSearch") queries.add(inline(value.props.query).trim());
-      if (value.type === "Gallery") {
-        for (const item of list(value.props.images)) {
-          const image = fields(item, "src");
-          if (inline(image.src).trim() === "") queries.add(inline(image.query).trim());
-        }
-      }
+      found(value);
       Object.values(value.props).forEach(visit);
     } else if (isPlainObject(value)) {
       Object.values(value).forEach(visit);
     }
   };
   roots.forEach(visit);
+}
+
+/** The image searches in evaluated nodes (ImageSearch queries, Gallery `{query}` items), in order, without repeats. */
+export function imageSearches(roots: readonly UiNode[]): string[] {
+  const queries = new Set<string>();
+  eachNode(roots, (node) => {
+    if (node.type === "ImageSearch") queries.add(inline(node.props.query).trim());
+    if (node.type === "Gallery") {
+      for (const item of list(node.props.images)) {
+        const image = fields(item, "src");
+        if (inline(image.src).trim() === "") queries.add(inline(image.query).trim());
+      }
+    }
+  });
   queries.delete("");
   return [...queries];
+}
+
+/** The Wikipedia articles Map places name for their photos, in order, without repeats. */
+export function wikiPhotos(roots: readonly UiNode[]): string[] {
+  const titles = new Set<string>();
+  eachNode(roots, (node) => {
+    if (node.type !== "Map") return;
+    for (const place of readPlaces(list(node.props.places))) if (place?.wiki) titles.add(place.wiki);
+  });
+  return [...titles];
+}
+
+/** A found photo as markdown, and its credit line; null when it can't be shown (no https image or source page). */
+function creditedPhoto(found: SearchedImage | null | undefined, alt: string): { readonly image: string; readonly credit: string } | null {
+  const image = found ? remoteImage(found.url, alt) : null;
+  const source = found ? webUrl(found.sourceUrl, ["https:"]) : null;
+  if (!found || image === null || source === null) return null;
+  const credit = `${found.creator}, ${found.license}`.replace(/[*_`[\]\\]/g, "\\$&");
+  return { image, credit: `_Photo: ${credit}, ${link("Wikimedia Commons", source)}_` };
 }
 
 /**
@@ -1004,12 +1108,9 @@ export function imageSearches(roots: readonly UiNode[]): string[] {
  * plain toMarkdown) it is named instead.
  */
 function searchedImage(query: string, alt: string, caption = ""): string {
-  const found = searched.get(query);
-  const image = found ? remoteImage(found.url, alt) : null;
-  const source = found ? webUrl(found.sourceUrl, ["https:"]) : null;
-  if (!found || image === null || source === null) return `🖼 ${caption || alt}`;
-  const credit = `${found.creator}, ${found.license}`.replace(/[*_`[\]\\]/g, "\\$&");
-  return [image, caption, `_Photo: ${credit}, ${link("Wikimedia Commons", source)}_`].filter((line) => line !== "").join("  \n");
+  const photo = creditedPhoto(searched.get(query), alt);
+  if (photo === null) return `🖼 ${caption || alt}`;
+  return [photo.image, caption, photo.credit].filter((line) => line !== "").join("  \n");
 }
 
 /** One Gallery item: a path, an https URL, or `{src|query, caption?}`. */
@@ -1025,22 +1126,36 @@ function galleryImage(item: Value): string {
   return caption === "" ? remote : `${remote}  \n${caption}`;
 }
 
-/** A Map as a numbered list, each place linked on OpenStreetMap: its pin, or a search for its name. */
-function placeList(places: readonly Value[], route: boolean): string {
-  const named = places.flatMap((item) => {
-    const place = fields(item, "name");
-    const name = inline(place.name).trim();
-    return name === "" ? [] : [{ name, note: inline(place.note).trim(), lat: place.lat, lng: place.lng }];
-  });
-  const lines = named.map(({ name, note, lat, lng }, index) => {
-    const located = finite(lat) && finite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
-    const url = located
-      ? new URL(`https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=15/${lat}/${lng}`)
-      : new URL(`https://www.openstreetmap.org/search?query=${encodeURIComponent(name)}`);
-    return `${index + 1}. **${name}**${note === "" ? "" : ` — ${note}`} · ${link("OpenStreetMap", url)}`;
-  });
-  const order = route && named.length > 1 ? `Route: ${named.map((place) => place.name).join(" → ")}` : "";
-  return paragraphs([order, lines.join("\n")]);
+/**
+ * A Map as a numbered list, each place linked on OpenStreetMap (its pin, or a
+ * search for its name), under a heading per day when places have days, with
+ * the place's Wikipedia photo and its credit when one was found. Numbered and
+ * joined in the order the map numbers them (groupByDay).
+ */
+function placeList(items: readonly Value[], route: boolean): string {
+  const places = readPlaces(items);
+  let number = 0;
+  return paragraphs(
+    groupByDay(places).map(({ label, places: indexes }) => {
+      const day = indexes.flatMap((index) => places[index] ?? []);
+      const lines = day.map(({ name, note, given, wiki }) => {
+        number += 1;
+        const url =
+          given === null
+            ? new URL(`https://www.openstreetmap.org/search?query=${encodeURIComponent(name)}`)
+            : new URL(`https://www.openstreetmap.org/?mlat=${given.lat}&mlon=${given.lng}#map=15/${given.lat}/${given.lng}`);
+        const marker = `${number}. `;
+        const head = `${marker}**${name}**${note === null ? "" : ` — ${note}`} · ${link("OpenStreetMap", url)}`;
+        const photo = wiki === null ? null : creditedPhoto(wikiFound.get(wiki), name);
+        // Hard breaks keep the photo and its credit inside the list item, under its text.
+        const indent = " ".repeat(marker.length);
+        return photo === null ? head : `${head}  \n${indent}${photo.image}  \n${indent}${photo.credit}`;
+      });
+      const order = route && day.length > 1 ? `Route: ${day.map((place) => place.name).join(" → ")}` : "";
+      const heading = [label === null ? "" : `**${label}**`, order].filter((part) => part !== "").join(" · ");
+      return paragraphs([heading, lines.join("\n")]);
+    }),
+  );
 }
 
 /**
@@ -1170,10 +1285,11 @@ export function toMarkdownWithProject(
   roots: readonly UiNode[],
   images: ReadonlyMap<string, SearchedImage | null>,
   answers: ReadonlyMap<string, ProjectResult>,
+  photos: ReadonlyMap<string, SearchedImage | null> = new Map(),
 ): string {
   projectAnswers = answers;
   try {
-    return toMarkdownWithImages(roots, images);
+    return toMarkdownWithImages(roots, images, photos);
   } finally {
     projectAnswers = new Map();
   }
@@ -1346,8 +1462,8 @@ function jsonMarkdown(value: Value, label: string): string {
 
 const RISK_TEXT: Record<string, string> = { low: "low risk", medium: "medium risk", high: "**high risk**" };
 
-/** A Plan as a numbered list: each step with its risk and estimate, detail and files below; the total and the approve label. */
-function planMarkdown(value: Value | undefined, submit: string): string {
+/** A Plan as a numbered list: each step with its risk and estimate, detail and files below; the total and the Approve choice. */
+function planMarkdown(value: Value | undefined): string {
   const { steps, error } = readPlan(value);
   if (error !== null) return `_(${error})_`;
   if (steps.length === 0) return "**Plan** · no steps";
@@ -1367,7 +1483,7 @@ function planMarkdown(value: Value | undefined, submit: string): string {
     `**Plan** · ${steps.length} ${steps.length === 1 ? "step" : "steps"}${size}${mixed ? " · estimates mix points and time" : ""}`,
     lines.join("\n"),
     moreLine(Math.min(steps.length, MARKDOWN_ROWS), steps.length, "step"),
-    `Submit: ${submit.trim() || "Approve plan"}`,
+    "Options: Approve",
   ]);
 }
 

@@ -45,6 +45,16 @@ export interface ParamSpec {
   readonly values?: readonly string[];
   /** For `binding`: the state's required type, checked at compile and evaluation time. */
   readonly holds?: StateKind;
+  /**
+   * Accepted so replies written before it was retired still render, and
+   * ignored: left out of every signature, so no prompt teaches it.
+   */
+  readonly legacy?: true;
+  /**
+   * Left out of the signatures because the reference states it once, in a
+   * line, for every component that takes it (`source:`).
+   */
+  readonly unlisted?: true;
 }
 
 export interface ComponentSpec {
@@ -65,6 +75,8 @@ const TONES = ["neutral", "good", "warn", "bad", "info"] as const;
 const tone = { name: "tone", kind: "enum", optional: true, values: TONES } as const;
 const label = { name: "label", kind: "string", optional: true } as const;
 const children = { name: "children", kind: "nodes" } as const;
+/** Where a Table's, Chart's or Metric's numbers come from; a quiet caption under it. */
+const source = { name: "source", kind: "string", optional: true, unlisted: true } as const;
 
 export const COMPONENTS = {
   Card: {
@@ -114,6 +126,7 @@ export const COMPONENTS = {
       { name: "value", kind: "string" },
       { name: "note", kind: "string", optional: true },
       tone,
+      source,
     ],
     summary: "key number; 2-4 in a Row",
   },
@@ -149,19 +162,21 @@ export const COMPONENTS = {
     params: [
       { name: "columns", kind: "list" },
       { name: "rows", kind: "list" },
+      source,
     ],
     summary: "rows: lists of values or components",
   },
   Chart: {
     group: "Data",
     params: [
-      { name: "type", kind: "enum", values: ["bar", "line", "area", "pie", "scatter", "radar", "funnel", "heatmap"] },
+      { name: "type", kind: "enum", values: ["bar", "line", "area", "pie", "scatter", "radar", "funnel", "heatmap", "histogram", "box"] },
       { name: "labels", kind: "list" },
       { name: "series", kind: "series" },
       { name: "unit", kind: "string", optional: true },
       { name: "stacked", kind: "boolean", optional: true },
+      source,
     ],
-    summary: "series: numbers or {name: numbers | {values, tone}}; scatter: labels are the x values; heatmap: one series per row",
+    summary: "series: numbers or {name: numbers | {values, tone}}; labels: scatter x values, histogram bin edges or []; heatmap: series = rows",
   },
   Sparkline: {
     group: "Data",
@@ -321,12 +336,12 @@ export const COMPONENTS = {
       { name: "icon", kind: "string", optional: true },
     ],
     summary:
-      "no action sends its label as the user's reply; primary: the one main action; destructive: deleting or discarding; icon: lucide name",
+      "no action: a choice; its label is the answer; primary: the one main action; destructive: deleting or discarding; icon: lucide name",
   },
   Form: {
     group: "Inputs",
-    params: [children, { name: "submit", kind: "string", optional: true }],
-    summary: "one labeled field per question; submit sends all answers in one message",
+    params: [children, { name: "submit", kind: "string", optional: true, legacy: true }],
+    summary: "one labeled field per question; the answers go into the user's message",
   },
   Timer: {
     group: "Widgets",
@@ -366,8 +381,10 @@ export const COMPONENTS = {
     params: [
       { name: "places", kind: "list" },
       { name: "route", kind: "boolean", optional: true },
+      { name: "tour", kind: "boolean", optional: true },
     ],
-    summary: "{name, lat?, lng?, note?}; names without lat/lng are looked up; route joins them",
+    summary:
+      "{name, lat?, lng?, note?, day?, wiki?: Wikipedia title (credited photo)}; names without lat/lng are looked up; route joins them day by day; tour drops pins in turn",
   },
   Hotspots: {
     group: "Media",
@@ -458,7 +475,7 @@ export const COMPONENTS = {
   FollowUps: {
     group: "Inputs",
     params: [{ name: "prompts", kind: "list" }],
-    summary: "suggested next questions; a tap sends one",
+    summary: "suggested next questions; a tap picks one",
   },
   Walkthrough: {
     group: "Widgets",
@@ -494,7 +511,7 @@ export const COMPONENTS = {
   Tests: {
     group: "Project",
     params: [{ name: "results", kind: "any" }, { name: "title", kind: "string", optional: true }],
-    summary: "Load a vitest/jest JSON or JUnit XML report, or [{name, status: passed|failed|skipped, message?, file?, line?}]",
+    summary: "a Load()ed test report, or [{name, status: passed|failed|skipped, message?, file?, line?}]",
   },
   Json: {
     group: "Project",
@@ -520,43 +537,43 @@ export const COMPONENTS = {
   Findings: {
     group: "Dev",
     params: [{ name: "items", kind: "any" }, { name: "title", kind: "string", optional: true }],
-    summary: "review/lint/type errors [{severity, title, file?, line?, detail?, fix?, status?: open|fixed|confirmed|rejected}] or Load ESLint JSON, SARIF, tsc output",
+    summary: "review/lint/type errors [{severity, title, file?, line?, detail?, fix?, status?: open|fixed|confirmed|rejected}] or a Load()ed lint/tsc report",
   },
   Coverage: {
     group: "Dev",
     params: [{ name: "report", kind: "any" }],
-    summary: "Load coverage-summary.json, lcov.info, coverage.py JSON or Go coverage.out",
+    summary: "a Load()ed coverage report",
   },
   Dependencies: {
     group: "Dev",
     params: [{ name: "report", kind: "any" }],
-    summary: "Load npm outdated/audit --json, pip list --outdated --format=json, or [{name, current, latest}]",
+    summary: "[{name, current, latest}] or a Load()ed npm/pip report",
   },
   Pipeline: {
     group: "Dev",
     params: [{ name: "run", kind: "any" }],
-    summary: "a CI run: Load gh run view --json jobs, or [{name, status, jobs?}]",
+    summary: "a CI run: [{name, status, jobs?}] or a Load()ed gh run",
   },
   Benchmark: {
     group: "Dev",
     params: [{ name: "results", kind: "any" }, { name: "unit", kind: "string", optional: true }],
-    summary: "before/after [{name, before, after, better?: lower|higher, context?}], every run [{name, metrics, status?, context?}] or Load hyperfine JSON",
+    summary: "before/after [{name, before, after, better?: lower|higher, context?}], every run [{name, metrics, status?, context?}] or a Load()ed hyperfine run",
   },
   Waterfall: {
     group: "Dev",
     params: [{ name: "spans", kind: "any" }, { name: "unit", kind: "string", optional: true }],
-    summary: "timings [{name, start, duration, depth?}] or Load a .har",
+    summary: "timings [{name, start, duration, depth?}] or a Load()ed HAR",
   },
   Treemap: {
     group: "Dev",
     params: [{ name: "items", kind: "any" }, { name: "unit", kind: "string", optional: true }],
-    summary: "sizes [{path, size}] or Load an esbuild metafile",
+    summary: "sizes [{path, size}] or a Load()ed du/esbuild report",
   },
   // Manage: planning and tracking, plus BB's own environments.
   Board: {
     group: "Manage",
     params: [{ name: "items", kind: "any" }, { name: "columns", kind: "list", optional: true }],
-    summary: "kanban: [{title, status, …}] or Load bb tasks list --json, gh issue list --json",
+    summary: "kanban: [{title, status, …}] or a Load()ed task/issue list",
   },
   Roadmap: {
     group: "Manage",
@@ -570,7 +587,7 @@ export const COMPONENTS = {
   },
   Plan: {
     group: "Manage",
-    params: [{ name: "steps", kind: "list" }, { name: "submit", kind: "string", optional: true }],
+    params: [{ name: "steps", kind: "list" }, { name: "submit", kind: "string", optional: true, legacy: true }],
     summary: "steps the user approves first [{title, detail?, files?, risk?, estimate?}]",
   },
   Decision: {
@@ -654,7 +671,7 @@ export type ComponentName = keyof typeof COMPONENTS;
 
 /** `Name(a, b?, $state, kind:x|y?)`: how the reference and the gallery write a component's or action's call. */
 export function callSignature(name: string, spec: ComponentSpec): string {
-  const params = spec.params.map((param) => {
+  const params = spec.params.filter((param) => param.legacy !== true && param.unlisted !== true).map((param) => {
     let base = param.kind === "binding" ? `$${param.name}` : param.name;
     // Tones are listed once in the reference header; other enums inline their values.
     if (param.kind === "enum" && param.name !== "tone") {
@@ -675,7 +692,7 @@ export function componentSignature(name: ComponentName): string {
 export const ACTIONS = {
   Send: {
     params: [{ name: "text", kind: "string" }],
-    summary: "send text as the user's next message",
+    summary: "the answer a picked Button or List row puts in the user's message",
   },
   Set: {
     params: [

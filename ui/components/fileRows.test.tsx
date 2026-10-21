@@ -5,7 +5,8 @@ import type * as PluginSdkApp from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Value } from "../../core/types";
-import { UiRuntimeContext, type UiRuntime } from "../runtime";
+import { useBlockAnswerTarget } from "../LiveUi";
+import { AnswersContext, UiRuntimeContext, type UiRuntime } from "../runtime";
 import type { Props } from "../values";
 import { Acceptance } from "./Acceptance";
 import { Findings } from "./Findings";
@@ -34,10 +35,10 @@ function runtime(canOpen: boolean): UiRuntime {
     async run() {},
     openFile: canOpen ? openFile : null,
     loadImage: null,
+    holdHeight: () => () => {},
     readText: null,
     loadAudio: null,
     loadAsset: null,
-    answer: null,
     superseded: false,
     threadId: null,
     blockKey: null,
@@ -62,12 +63,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** The gallery's answer sheet, which Findings' fix buttons stage into. */
+function Answers({ children }: { children: ReactNode }) {
+  return <AnswersContext value={useBlockAnswerTarget({ kind: "gallery" }, "fileRows.test", false, () => 0)}>{children}</AnswersContext>;
+}
+
 function render(component: (props: { props: Props }) => ReactNode, props: Props, canOpen = true): void {
   const Component = component;
   act(() =>
     root.render(
       <UiRuntimeContext value={runtime(canOpen)}>
-        <Component props={props} />
+        <Answers>
+          <Component props={props} />
+        </Answers>
       </UiRuntimeContext>,
     ),
   );

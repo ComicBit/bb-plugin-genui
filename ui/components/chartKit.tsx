@@ -61,6 +61,24 @@ export const DRAW: Entrance = {
   duration: CHART_DRAW_MS,
 };
 
+/** Bars grow out of their baseline; set `transformOrigin` at it. */
+export const GROW: Entrance = {
+  keyframes: [{ transform: "scaleY(0)" }, { transform: "scaleY(1)" }],
+  duration: CHART_DRAW_MS,
+};
+/** Bars after this many grow together. */
+export const GROW_STAGGER_STEPS = 10;
+
+/** A bar with rounded top corners (bottom corners for negative bars); square when not `rounded`. */
+export function barPath(x: number, width: number, from: number, to: number, rounded = true): string {
+  const height = Math.abs(to - from);
+  const r = rounded ? Math.min(3, width / 2, height) : 0;
+  if (to <= from) {
+    return `M${x},${from} V${to + r} Q${x},${to} ${x + r},${to} H${x + width - r} Q${x + width},${to} ${x + width},${to + r} V${from} Z`;
+  }
+  return `M${x},${from} V${to - r} Q${x},${to} ${x + r},${to} H${x + width - r} Q${x + width},${to} ${x + width},${to - r} V${from} Z`;
+}
+
 /** The latest-point marker appears once the line has nearly reached it. */
 const MARKER: Entrance = { keyframes: FADE.keyframes, duration: 400, delay: 700 };
 

@@ -99,6 +99,87 @@ export function collectLoads(program: Program): DataRequest[] {
   return [...requests.values()];
 }
 
+/**
+ * The files the given expressions read their data from: every `Load` they
+ * reach, following named values, `$state` initializers and named functions
+ * to their definitions (each once, so a cycle ends), in the order reached.
+ * An arrow's parameters shadow the top-level names they share. Only plain
+ * string paths count, the only ones collectLoads has the host fetch.
+ */
+export function loadsReached(program: Program, exprs: readonly Expr[]): string[] {
+  const paths = new Set<string>();
+  const followed = new Set<string>();
+  const follow = (key: string, decl: Expr | undefined): void => {
+    if (decl === undefined || followed.has(key)) return;
+    followed.add(key);
+    // A named function sees only its parameters and the top-level names.
+    if (decl.type === "arrow") visit(decl.body, new Set(decl.params));
+    else visit(decl, new Set());
+  };
+  const visit = (expr: Expr, bound: ReadonlySet<string>): void => {
+    switch (expr.type) {
+      case "literal":
+        return;
+      case "state":
+        follow(`$${expr.name}`, program.states.find((decl) => decl.name === expr.name)?.value);
+        return;
+      case "ident":
+        if (!bound.has(expr.name)) follow(expr.name, program.named.get(expr.name)?.value);
+        return;
+      case "template":
+        for (const part of expr.parts) visit(part, bound);
+        return;
+      case "list":
+        for (const item of expr.items) visit(item, bound);
+        return;
+      case "object":
+        for (const entry of expr.entries) visit(entry.value, bound);
+        return;
+      case "unary":
+        visit(expr.operand, bound);
+        return;
+      case "binary":
+        visit(expr.left, bound);
+        visit(expr.right, bound);
+        return;
+      case "conditional":
+        visit(expr.test, bound);
+        visit(expr.then, bound);
+        visit(expr.else, bound);
+        return;
+      case "member":
+        visit(expr.object, bound);
+        return;
+      case "index":
+        visit(expr.object, bound);
+        visit(expr.index, bound);
+        return;
+      case "arrow":
+        visit(expr.body, new Set([...bound, ...expr.params]));
+        return;
+      case "method":
+        visit(expr.object, bound);
+        for (const arg of expr.args) visit(arg, bound);
+        for (const arg of expr.named) visit(arg.value, bound);
+        return;
+      case "call": {
+        if (expr.name === "Load") {
+          const path = loadPath(expr.args[0]);
+          if (path) paths.add(path);
+          return;
+        }
+        const own = bound.has(expr.name) ? undefined : program.named.get(expr.name)?.value;
+        if (own?.type === "arrow") follow(expr.name, own);
+        for (const arg of expr.args) visit(arg, bound);
+        for (const arg of expr.named) visit(arg.value, bound);
+        return;
+      }
+    }
+  };
+  for (const expr of exprs) visit(expr, new Set());
+  return [...paths];
+}
+
 /** The lines a Snippet shows, or a user-facing reason it cannot show them. */
 export type SnippetLines = { readonly code: string; readonly error: null } | { readonly code: null; readonly error: string };
 
