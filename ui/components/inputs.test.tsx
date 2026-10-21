@@ -170,6 +170,22 @@ describe("List rows", () => {
     expect(rows.map(hintOnFocus)).toEqual(["Send as your reply", "Open https://github.com/vitest-dev/vitest/releases", null]);
   });
 
+  it("draw an action's glyph given as a row's icon once, at the end, and keep it on a row that doesn't act", () => {
+    render(
+      <List
+        props={{
+          items: [
+            { title: "Copy the token", icon: "Copy", action: copy("ghp_example") },
+            { title: "Read the docs", icon: "external-link", action: send("Summarise the docs") },
+            { title: "Copied to your clipboard", icon: "Copy" },
+          ],
+        }}
+      />,
+    );
+    const icons = [...container.querySelectorAll("li")].map((row) => [...row.querySelectorAll("[data-icon]")].map((icon) => icon.getAttribute("data-icon")));
+    expect(icons).toEqual([["Copy"], ["Sent"], ["Copy"]]);
+  });
+
   it("put the hint at the row's end, where it lets clicks through to the row above", () => {
     render(<List props={{ items: [{ title: "Release notes", action: open("https://example.com/notes") }] }} />);
     const row = container.querySelector("button")!;

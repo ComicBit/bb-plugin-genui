@@ -18,6 +18,7 @@ import {
 import { RenderNodes } from "./render";
 import { useReservedHeight } from "./reservedHeight";
 import { UiRuntimeContext, type UiRuntime } from "./runtime";
+import { openableLink } from "./components/action-logic";
 import { HintProvider } from "./components/inputs";
 import { EntranceContext, newStreamCadence, trackStream, useMotionScope } from "./components/motion";
 
@@ -152,15 +153,9 @@ export function LiveUi({
           }
           return;
         case "openUrl": {
-          let url: URL;
-          try {
-            url = new URL(action.url);
-          } catch {
-            throw new Error(`Invalid link: ${action.url}`);
-          }
-          if (url.protocol !== "http:" && url.protocol !== "https:") {
-            throw new Error("Only http and https links can be opened");
-          }
+          // The same check as the hint's, so the hint never names a link this refuses.
+          const url = openableLink(action.url);
+          if (url === null) throw new Error(`Only http and https links can be opened: ${action.url}`);
           if (!navigate.openUrl(url.href)) throw new Error(`Couldn't open ${url.href}`);
           return;
         }

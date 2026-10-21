@@ -38,8 +38,14 @@ export function actionIntent(actions: readonly Action[], shown?: string): Action
     switch (action.type) {
       case "send":
         return [words(action.text) === visible ? "Send as your reply" : `Send “${clip(action.text)}”`];
-      case "openUrl":
-        return [`Open ${clip(linkTarget(action.url))}`];
+      case "openUrl": {
+        const url = openableLink(action.url);
+        if (url === null) return [`Can't open ${clip(action.url)}: only http and https links open`];
+        // Without a user name and password, as browsers show addresses: `https://github.com@evil.com/` reads `https://evil.com/`.
+        url.username = "";
+        url.password = "";
+        return [`Open ${clip(url.href)}`];
+      }
       case "copy":
         return [words(action.text) === visible ? "Copy to the clipboard" : `Copy “${clip(action.text)}”`];
       case "set":
@@ -55,30 +61,36 @@ function words(text: string): string {
 }
 
 /**
- * The address the browser opens, as LiveUi parses it, so punycode and escapes
- * show what it really is. A user name and password are left out, as browsers
- * show addresses: `https://github.com@evil.com/` reads `https://evil.com/`.
+ * The address an OpenUrl opens, parsed as the browser does, so punycode and
+ * escapes show what it really is; null unless it is an http or https link,
+ * which LiveUi refuses to open.
  */
-function linkTarget(url: string): string {
+export function openableLink(url: string): URL | null {
+  let parsed: URL;
   try {
-    const parsed = new URL(url);
-    parsed.username = "";
-    parsed.password = "";
-    return parsed.href;
+    parsed = new URL(url);
   } catch {
-    return url;
+    return null;
   }
+  return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed : null;
 }
+
+/**
+ * Where a quoted text breaks a line, the next one is indented, so no line of
+ * a sent or copied text reads as another action's (CSS keeps an em space at
+ * the start of a line, where it drops a space).
+ */
+const QUOTED_LINE_BREAK = "\n\u2003\u2003";
 
 const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 
-/** `text` trimmed and, past HINT_TEXT_MAX characters, cut after a whole word with an ellipsis. */
+/** `text` trimmed and, past HINT_TEXT_MAX characters, cut after a whole word with an ellipsis; its later lines indented. */
 function clip(text: string): string {
   // Characters as the reader sees them: a flag or a family emoji is one, never cut in half.
   const characters = Array.from(GRAPHEMES.segment(text.trim()), (part) => part.segment);
-  if (characters.length <= HINT_TEXT_MAX) return characters.join("");
+  if (characters.length <= HINT_TEXT_MAX) return characters.join("").replaceAll("\n", QUOTED_LINE_BREAK);
   const cut = characters.slice(0, HINT_TEXT_MAX).join("");
   // A cut that falls just before a space already ends on a whole word.
   const space = /\s/.test(characters[HINT_TEXT_MAX]) ? cut.length : cut.search(/\s\S*$/);
-  return `${(space > cut.length / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
+  return `${(space > cut.length / 2 ? cut.slice(0, space) : cut).trimEnd()}…`.replaceAll("\n", QUOTED_LINE_BREAK);
 }

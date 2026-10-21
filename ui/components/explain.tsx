@@ -10,7 +10,7 @@ import { resolveIconName } from "../icons";
 import { RenderNode } from "../render";
 import { useUiRuntime } from "../runtime";
 import { ACCENT, isNode, list, TONE_DOT, TONE_PILL, TONE_TEXT, type Props } from "../values";
-import { actionIntent } from "./action-logic";
+import { ACTION_GLYPHS, actionIntent } from "./action-logic";
 import { Code } from "./code";
 import { CheckMark, ErrorLine } from "./display";
 import {
@@ -253,6 +253,15 @@ export function Walkthrough({ props }: { props: Props }) {
 
 type Leading = "icon" | "dot" | null;
 
+/**
+ * A row's own icon, as on a Button: on a row that acts, never an action's
+ * glyph, which its end already draws or which would promise another action.
+ */
+function rowIcon(row: ListRow): string | null {
+  const named = row.icon === null ? null : resolveIconName(row.icon);
+  return named !== null && row.actions.length > 0 && ACTION_GLYPHS.has(named) ? null : named;
+}
+
 function ListValue({ value }: { value: ListRow["value"] }): ReactNode {
   if (value === null) return null;
   if (isNode(value)) {
@@ -272,7 +281,7 @@ function ListItem({ row, leading }: { row: ListRow; leading: Leading }) {
   const { run, answer, superseded } = useUiRuntime();
   const rise = useEntrance<HTMLLIElement>(RISE);
   const [running, setRunning] = useState(false);
-  const icon = row.icon === null ? null : resolveIconName(row.icon);
+  const icon = rowIcon(row);
   const toneName = row.tone ?? "neutral";
   const sends = sentTexts(row.actions);
   // A row that replies is a choice: once this UI answered, or the thread moved on, it is no longer a question.
@@ -355,7 +364,7 @@ export function List({ props }: { props: Props }) {
     return list(props.items).length === 0 ? null : <ErrorLine message="List items need a title" />;
   }
   // One leading column for every row, so titles align.
-  const leading: Leading = rows.some((row) => row.icon !== null && resolveIconName(row.icon) !== null)
+  const leading: Leading = rows.some((row) => rowIcon(row) !== null)
     ? "icon"
     : rows.some((row) => row.tone !== null)
       ? "dot"

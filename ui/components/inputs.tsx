@@ -434,7 +434,11 @@ export function ActionHint({
     <Tooltip open={open && hint !== null} onOpenChange={setOpen} disableHoverableContent>
       <TooltipTrigger asChild>{children}</TooltipTrigger>
       {hint === null ? null : (
-        <TooltipContent align={align} className="pointer-events-none whitespace-pre-line">
+        <TooltipContent
+          align={align}
+          // The registry's fade and zoom, in and out, hold still when the system asks for reduced motion.
+          className="pointer-events-none whitespace-pre-line motion-reduce:animate-none motion-reduce:data-[state=closed]:animate-none"
+        >
           {hint}
         </TooltipContent>
       )}

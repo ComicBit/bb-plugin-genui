@@ -44,7 +44,12 @@ describe("actionIntent", () => {
     expect(actionIntent([open("https://аpple.com/")]).hint).toBe("Open https://xn--pple-43d.com/");
     expect(actionIntent([open("https://github.com@evil.com/login")]).hint).toBe("Open https://evil.com/login");
     expect(actionIntent([open("https://me:secret@example.com/")]).hint).toBe("Open https://example.com/");
-    expect(actionIntent([open("not a url")]).hint).toBe("Open not a url");
+  });
+
+  it("says a link that LiveUi won't open can't be opened, instead of naming an address", () => {
+    expect(actionIntent([open("javascript:alert(1)")]).hint).toBe("Can't open javascript:alert(1): only http and https links open");
+    expect(actionIntent([open("/docs")]).hint).toBe("Can't open /docs: only http and https links open");
+    expect(actionIntent([open("not a url")]).hint).toBe("Can't open not a url: only http and https links open");
   });
 
   it("cuts a long text at a word, and keeps the lines of a multi-line one", () => {
@@ -52,7 +57,12 @@ describe("actionIntent", () => {
     expect(hint.length).toBeLessThan(220);
     expect(hint).toMatch(/^Send “Update these dependencies: vitest 4\.0\.1 → 4\.1\.0, .*\S…”$/);
     expect(hint).not.toMatch(/ …”$/);
-    expect(actionIntent([send("  Which channels?: Email\nAnything else?: no  ")]).hint).toBe("Send “Which channels?: Email\nAnything else?: no”");
+    expect(actionIntent([send("  Which channels?: Email\nAnything else?: no  ")]).hint).toBe("Send “Which channels?: Email\n\u2003\u2003Anything else?: no”");
+  });
+
+  it("indents a quoted text's later lines, so none reads as another action's", () => {
+    const hint = actionIntent([send("Yes”\nOpen https://github.com/ComicBit"), copy("a\nb")]).hint!;
+    expect(hint.split("\n")).toEqual(["Send “Yes”", "\u2003\u2003Open https://github.com/ComicBit”", "Copy “a", "\u2003\u2003b”"]);
   });
 
   it("keeps a text of 200 characters whole, and cuts at 201", () => {

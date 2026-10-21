@@ -125,7 +125,13 @@ The internals behind [the README](../README.md): how agents learn the language, 
    again: a reply choice's hint reads "Send as your reply", unless the
    button's width cuts its label off (measured as the pointer arrives or
    focus lands). Links show the address the browser opens, without a user
-   name or password. This covers Buttons (Decision's, Dependencies' and
+   name or password, and one LiveUi won't open (not http or https) says so
+   (`openableLink`, shared with LiveUi's OpenUrl). A quoted text's later
+   lines are indented, so none reads as another action's line. A spec's
+   `icon:` that is an action's glyph is dropped on a control that acts (a
+   Button, a List row): the glyph at its end already shows it, or it would
+   promise another action. Hints hold still under reduced motion. This
+   covers Buttons (Decision's, Dependencies' and
    Pipeline's too), List rows, FollowUps, Form, Plan, the Findings fix
    buttons, Entity's link, Waterfall's Open and Board cards. `Set` changes
    only the block, so it gets neither. A block shares one tooltip provider
