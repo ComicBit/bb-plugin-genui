@@ -26,7 +26,7 @@ import type { rpcContract } from "../../server";
 import { useUiRuntime } from "../runtime";
 import { TONE_DOT, TONE_PILL, TONE_TEXT, type Props, type Tone } from "../values";
 import { FOCUS_RING } from "./inputs";
-import { EXACT_TIME, FailureLine, Freshness, LoadingRows, NeedsThread, Panel, QuietLine, useNow, useProjectQuery, useVisible } from "./projectKit";
+import { EXACT_TIME, FailureLine, Freshness, NeedsThread, Panel, QuietLine, useNow, useProjectQuery, useVisible } from "./projectKit";
 
 export const STATE_TONE: Record<PullRequestState, Tone> = { open: "good", draft: "neutral", merged: "info", closed: "bad" };
 export const STATE_ICON: Record<PullRequestState, string> = {
@@ -107,7 +107,7 @@ function PullRequestPanel({ threadId }: { threadId: string }) {
         }
       >
         {answer === null ? (
-          <LoadingRows label="Loading the pull request" rows={2} />
+          <PullRequestSkeleton />
         ) : !answer.ok ? (
           <FailureLine failure={answer} />
         ) : pr === null ? (
@@ -182,6 +182,41 @@ function PullRequestBody({ pr, now }: { pr: PullRequestInfo; now: number }) {
           <Fact label="Merge" tone={MERGE_TONE[pr.mergeability]} value={MERGEABILITY_LABEL[pr.mergeability]} detail={pr.inMergeQueue ? "in merge queue" : ""} />
         )}
       </dl>
+    </div>
+  );
+}
+
+const BAR = "animate-pulse rounded-sm bg-muted motion-reduce:animate-none";
+
+/**
+ * The body's layout while BB answers, so the panel opens at about its final
+ * height instead of growing by a title, a refs line and three facts once the
+ * answer comes. A phone wraps most titles onto two lines.
+ */
+function PullRequestSkeleton() {
+  return (
+    <div role="status" aria-label="Loading the pull request" className="flex min-w-0 flex-col gap-3 px-3 py-3">
+      <div className="flex min-w-0 flex-col gap-1">
+        <div className="flex h-12 flex-col justify-center gap-3 min-[420px]:h-6">
+          <div className={cn("h-3.5 w-11/12", BAR)} />
+          <div className={cn("h-3.5 w-1/2 min-[420px]:hidden", BAR)} />
+        </div>
+        <div className="flex h-5 items-center">
+          <div className={cn("h-3 w-1/2", BAR)} />
+        </div>
+      </div>
+      <div className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-2 min-[420px]:grid-cols-3">
+        {[0, 1, 2].map((index) => (
+          <div key={index} className="flex min-w-0 flex-col gap-0.5">
+            <div className="flex h-4 items-center">
+              <div className={cn("h-2.5 w-12", BAR)} />
+            </div>
+            <div className="flex h-5 items-center">
+              <div className={cn("h-3 w-20", BAR)} />
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

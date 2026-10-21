@@ -10,6 +10,7 @@ import {
 } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
 import { Icon } from "@/components/ui/icon";
+import { useCodeHeight } from "../codeHeight";
 import { useUiRuntime } from "../runtime";
 import { useSketchFont } from "../sketchFont";
 import { useBackdropColor, useDarkTheme } from "../theme";
@@ -45,15 +46,23 @@ const EXTENSIONS: Readonly<Record<string, string>> = {
 const ICON_BUTTON =
   "inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-background hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
-/** A bordered code surface with a quiet caption bar. */
-function CodeFrame({ caption, actions, children }: { caption: ReactNode; actions: ReactNode; children: ReactNode }) {
+/**
+ * A bordered code surface with a quiet caption bar. With `lines` (Code and
+ * Snippet; null while unknown) the body holds the height BB's viewer will
+ * draw that many lines at while it loads (codeHeight.ts).
+ */
+function CodeFrame({ caption, actions, lines, children }: { caption: ReactNode; actions: ReactNode; lines?: number | null; children: ReactNode }) {
+  const body = useRef<HTMLDivElement>(null);
+  useCodeHeight(body, lines ?? null);
   return (
     <div className="min-w-0 overflow-hidden rounded-lg border border-border bg-background">
       <div className="flex h-8 items-center justify-between gap-3 border-b border-border bg-surface-recessed pl-3 pr-1.5 text-[11px] text-muted-foreground">
         <span className="flex min-w-0 items-center gap-2 font-mono">{caption}</span>
         {actions}
       </div>
-      <div className="max-h-96 overflow-auto text-xs">{children}</div>
+      <div ref={body} className="max-h-96 overflow-auto text-xs">
+        {children}
+      </div>
     </div>
   );
 }
@@ -93,7 +102,7 @@ export function Code({ props }: { props: Props }) {
   const language = optionalText(props.language)?.trim().toLowerCase() || null;
   const extension = language === null ? "txt" : (EXTENSIONS[language] ?? language.replace(/[^a-z0-9]/g, "")) || "txt";
   return (
-    <CodeFrame caption={<span className="truncate">{language ?? "code"}</span>} actions={<CopyButton code={code} />}>
+    <CodeFrame caption={<span className="truncate">{language ?? "code"}</span>} actions={<CopyButton code={code} />} lines={code.split("\n").length}>
       <HostSourceCode content={code} path={viewerPath(`snippet.${extension}`, code)} overflow="scroll" />
     </CodeFrame>
   );
@@ -141,8 +150,11 @@ export function Snippet({ props }: { props: Props }) {
     body = <HostSourceCode content={code} path={viewerPath(path, code)} overflow="scroll" />;
   }
 
+  // The viewer draws one line per newline-separated part; while the file loads, the range asked for is the best guess.
+  const lines = error !== null ? null : code !== null ? code.split("\n").length : to !== null && to >= from ? to - from + 1 : null;
   return (
     <CodeFrame
+      lines={lines}
       caption={
         <>
           <span className="truncate text-foreground" title={path}>
@@ -270,9 +282,11 @@ function hash(text: string): string {
 
 /**
  * Mermaid draws asynchronously, after the row holding the diagram is laid
- * out: when BB's timeline mounts the row as the user scrolls, or when a
- * thread opens. Until the drawing is there, it holds the height it had last
- * time at this width, so the conversation doesn't move under the reader.
+ * out, and BB draws it only once it comes within 256 px of the screen. Until
+ * the drawing is there, the box holds exactly the height it had last time at
+ * this width, so the conversation doesn't move under the reader. A diagram
+ * never drawn here keeps the tallest of its placeholders (the font loading,
+ * then BB's "Rendering diagram..."), so it moves once, when it draws.
  */
 function useDrawnHeight(element: RefObject<HTMLDivElement | null>, dark: boolean, source: string): void {
   useLayoutEffect(() => {
@@ -281,15 +295,40 @@ function useDrawnHeight(element: RefObject<HTMLDivElement | null>, dark: boolean
     // Wide diagrams scale to the width, so their height depends on it.
     const key = `${dark ? "d" : "l"}:${Math.round(box.clientWidth / 40)}:${hash(source)}`;
     const drawn = () => box.querySelector("svg[aria-roledescription]") !== null;
+    // Drawn, or BB showing the source instead (its toggle, or a diagram it couldn't draw).
+    const settled = () => drawn() || box.querySelector("pre") !== null;
     const reserved = DRAWN_HEIGHTS.get(key);
-    if (reserved !== undefined && !drawn()) box.style.minHeight = `${reserved}px`;
-    const observer = new ResizeObserver(() => {
-      if (!drawn()) return;
+    let holding = !settled();
+    if (holding && reserved !== undefined) {
+      box.style.height = `${reserved}px`;
+      box.style.overflow = "clip";
+    } else if (holding) {
+      box.style.minHeight = `${box.offsetHeight}px`;
+    }
+    const release = () => {
+      holding = false;
+      box.style.height = "";
       box.style.minHeight = "";
-      rememberHeight(key, box.offsetHeight);
+      box.style.overflow = "";
+    };
+    const observer = new ResizeObserver(() => {
+      // A placeholder taller than the last one raises the floor.
+      if (holding && reserved === undefined) box.style.minHeight = `${box.offsetHeight}px`;
+      if (!holding && drawn()) rememberHeight(key, box.offsetHeight);
+    });
+    // A box held at a fixed height doesn't resize as its content changes: watch the content.
+    const content = new MutationObserver(() => {
+      if (!holding || !settled()) return;
+      release();
+      if (drawn()) rememberHeight(key, box.offsetHeight);
     });
     observer.observe(box);
-    return () => observer.disconnect();
+    content.observe(box, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      content.disconnect();
+      release();
+    };
   }, [element, dark, source]);
 }
 
