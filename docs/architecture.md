@@ -99,15 +99,23 @@ The internals behind [the README](../README.md): how agents learn the language, 
      conversation moves under the reader. The overlay renders a block it
      finds in the same task as BB's DOM change, before the browser paints
      (`flushSync` in its MutationObserver; streaming text is batched every
-     60 ms). A remounted block reuses what it had: files already loaded
-     (`useLoadedData`), its settled state, an app's last height, a
-     diagram's last drawn height at that width (kept in `localStorage`), and
-     no replayed entrance. A block opened on a fresh page (the app started,
-     the plugin reloaded) holds the height it last settled at, at that width
-     (`ui/reservedHeight.ts`, also in `localStorage`), until what it reads
-     arrives; a component waiting for a `Load` is a quiet placeholder, never
-     an error line. Height glides (`useSmoothHeight`) only follow the
-     user's own input; anything else snaps. `scripts/scroll-jitter.mjs`
+     60 ms). A remounted block reuses what it had: files and its images
+     already read in this page (`useLoadedData`), its settled state, an
+     app's last height, a diagram's last drawn height at that width (kept in
+     `localStorage`), and no replayed entrance. A block opened on a fresh
+     page (the app started, the plugin reloaded) holds the height it last
+     settled at, at that width (`ui/reservedHeight.ts`, also in
+     `localStorage`), until the files and images it reads arrive and its
+     pictures decode, however long a remote BB takes (a picture the browser
+     can't decode isn't kept for the page, so the next mount reads it
+     again); a component waiting for a `Load` is a quiet
+     placeholder, never an error line. An Image is laid out at the natural
+     size its picture last decoded at (kept in `localStorage`; not for SVGs,
+     which lay themselves out) before the picture arrives, and a reply seen
+     answered folds its choices on the first frame instead of when BB's
+     outline is read again (`ui/useSuperseded.ts`); until the outline says,
+     the block remembers no height. Height glides (`useSmoothHeight`) only
+     follow the user's own input; anything else snaps. `scripts/scroll-jitter.mjs`
      measures it. Both paths mark mounts with `data-genui-fence` and
      `data-genui-renderer="slot" | "overlay"`; the script reports mount
      counts and hidden code blocks as well as drift. Only the overlay adds

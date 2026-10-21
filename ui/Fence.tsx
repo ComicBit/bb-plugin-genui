@@ -128,7 +128,8 @@ function AppFence({
 }) {
   const answers = useAnswerTarget(threadId, messageId, fence, actions);
   const superseded = useSuperseded(threadId, messageId);
-  return <AppBlock html={code} ready={complete} stateKey={stateKey} answers={answers} superseded={superseded} />;
+  // Null while BB's outline is read: an app's answers stay open until it says.
+  return <AppBlock html={code} ready={complete} stateKey={stateKey} answers={answers} superseded={superseded === true} />;
 }
 
 function UiFence({
@@ -154,7 +155,7 @@ function UiFence({
   if (result.program !== null) lastGood.current = result;
   const shown = lastGood.current;
   const data = useLoadedData({ threadId }, shown?.program ?? null);
-  const loadImage = useImageLoader({ threadId });
+  const loadImage = useImageLoader({ threadId }, stateKey);
   const readText = useTextLoader({ threadId });
   const loadAudio = useAudioLoader({ threadId });
   const loadAsset = useAssetLoader({ threadId });

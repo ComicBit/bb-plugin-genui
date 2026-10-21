@@ -92,8 +92,11 @@ export function LiveUi({
   readText: UiRuntime["readText"];
   loadAudio: UiRuntime["loadAudio"];
   loadAsset: UiRuntime["loadAsset"];
-  /** A later user message exists in the thread (see UiRuntime.superseded). */
-  superseded?: boolean;
+  /**
+   * A later user message exists in the thread (see UiRuntime.superseded);
+   * null while that isn't known yet, when the block remembers no height.
+   */
+  superseded?: boolean | null;
   threadId: UiRuntime["threadId"];
   blockKey: UiRuntime["blockKey"];
   /** Set on the gallery page: which example this is (see Frame). */
@@ -165,15 +168,28 @@ export function LiveUi({
     [navigate, setValue],
   );
 
+  // Pictures still being read: the block keeps its remembered height until they arrive.
+  const [holds, setHolds] = useState(0);
+  const holdHeight = useCallback(() => {
+    setHolds((count) => count + 1);
+    let held = true;
+    return () => {
+      if (!held) return;
+      held = false;
+      setHolds((count) => count - 1);
+    };
+  }, []);
+
   const runtime = useMemo<UiRuntime>(
     () => ({
       setValue,
       openFile,
       loadImage,
+      holdHeight,
       readText,
       loadAudio,
       loadAsset,
-      superseded,
+      superseded: superseded === true,
       threadId,
       blockKey,
       async run(actions) {
@@ -184,7 +200,7 @@ export function LiveUi({
         }
       },
     }),
-    [setValue, openFile, loadImage, readText, loadAudio, loadAsset, superseded, threadId, blockKey, runAction],
+    [setValue, openFile, loadImage, holdHeight, readText, loadAudio, loadAsset, superseded, threadId, blockKey, runAction],
   );
 
   const blockRoot = useRef<HTMLDivElement | null>(null);
@@ -195,7 +211,7 @@ export function LiveUi({
     );
     return placed === -1 ? UNPLACED : placed;
   }, []);
-  const answers = useBlockAnswerTarget(target, stateKey, superseded, place);
+  const answers = useBlockAnswerTarget(target, stateKey, superseded === true, place);
 
   const { roots, diagnostics } = useMemo(() => evaluate(program, state, data), [program, state, data]);
   // Memoized elements let React skip the tree when only a parent re-renders.
@@ -220,7 +236,8 @@ export function LiveUi({
   );
   const { content, minHeight } = useReservedHeight(
     stateKey,
-    files.some((file) => file.status === "reading"),
+    holds > 0 || files.some((file) => file.status === "reading"),
+    superseded === null,
   );
   const [entrance] = useState(() => {
     const remount = MOUNTED.has(stateKey);

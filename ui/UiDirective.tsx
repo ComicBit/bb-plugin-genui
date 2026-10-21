@@ -89,7 +89,7 @@ function StoredUi({
     [sdk, threadId, messageId, reply],
   );
   const data = useLoadedData({ threadId }, compiled.program);
-  const loadImage = useImageLoader({ threadId });
+  const loadImage = useImageLoader({ threadId }, `bb.genui.state:${id}`);
   const readText = useTextLoader({ threadId });
   const loadAudio = useAudioLoader({ threadId });
   const loadAsset = useAssetLoader({ threadId });
