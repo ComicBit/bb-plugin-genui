@@ -27,6 +27,7 @@ import { toast } from "sonner";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import type { Size } from "../../core/compare";
+import { usePaneBounds } from "../paneBounds";
 import { useUiRuntime } from "../runtime";
 import { EASE_OUT_EXPO, reducedMotion, useMotionScope } from "./motion";
 import {
@@ -456,9 +457,11 @@ const stop = (event: SyntheticEvent) => event.stopPropagation();
  * The full-screen shell: a top bar (`status`, `actions`, close), the pane and
  * an optional footer. Closed by Escape, the close button or a tap on the
  * shell itself; focus stays inside while open and the page under it doesn't
- * scroll. Portaled to the body with the plugin's scope attributes so its
- * styles still apply. `onKeyDown` sees keys first and takes one by
- * preventing its default.
+ * scroll. With threads side by side (or stacked) in BB it covers the pane the
+ * block is in, and the rest of the window dims and closes it on a tap.
+ * Portaled to the body with the plugin's scope attributes so its styles
+ * still apply. `onKeyDown` sees keys first and takes one by preventing its
+ * default.
  */
 export function FullScreen({
   label,
@@ -483,6 +486,9 @@ export function FullScreen({
   const motion = useMotionScope();
   const dialog = useRef<HTMLDivElement>(null);
   const close = useRef<HTMLButtonElement>(null);
+  // Stays where the view was opened from, so the view finds the pane around it.
+  const anchor = useRef<HTMLSpanElement>(null);
+  const bounds = usePaneBounds(anchor, true);
 
   useLayoutEffect(() => {
     close.current?.focus();
@@ -523,7 +529,7 @@ export function FullScreen({
     }
   };
 
-  return createPortal(
+  const portal = createPortal(
     // pointer-events: a modal Radix dialog (Entity's detail) leaves the body unclickable until its exit ends.
     // React bubbles a portal's events through the component that opened it: a
     // click or key in here must not toggle a row, close a panel or pick a pin there.
@@ -541,6 +547,7 @@ export function FullScreen({
       onPointerUp={stop}
       onMouseDown={stop}
     >
+      {bounds === null ? null : <div aria-hidden className="fixed inset-0 z-[2147483000] bg-black/40" onClick={onClose} />}
       <div
         ref={dialog}
         role="dialog"
@@ -554,6 +561,7 @@ export function FullScreen({
           if (event.target === event.currentTarget) onClose();
         }}
         className={cn("fixed inset-0 z-[2147483000] flex select-none flex-col overscroll-none outline-none", TONES[tone].shell)}
+        style={bounds === null ? undefined : { ...bounds, right: "auto", bottom: "auto" }}
       >
         <div className="flex shrink-0 items-center justify-between gap-3 px-3 pb-2 pt-[max(0.75rem,env(safe-area-inset-top))]">
           <span className={cn("min-w-0 truncate text-xs tabular-nums", TONES[tone].muted)}>{status}</span>
@@ -569,6 +577,12 @@ export function FullScreen({
       </div>
     </div>,
     document.body,
+  );
+  return (
+    <>
+      <span ref={anchor} hidden />
+      {portal}
+    </>
   );
 }
 

@@ -30,6 +30,7 @@ import {
   type AppTheme,
 } from "./appDocument";
 import { Frame, useBlockAnswerTarget, type AnswerTarget } from "./LiveUi";
+import { usePaneBounds } from "./paneBounds";
 import { rememberHeight, storedHeight } from "./reservedHeight";
 import { AnswersContext } from "./runtime";
 import { FOCUS_RING, InMessageLine, SentLine } from "./components/inputs";
@@ -296,6 +297,7 @@ function AppFrame({
   const [full, setFull] = useState(false);
   const fullRef = useRef(full);
   fullRef.current = full;
+  const bounds = usePaneBounds(dialogRef, full);
 
   // Remembered at this width (a remount, a reload): open at it.
   useLayoutEffect(() => {
@@ -306,7 +308,8 @@ function AppFrame({
 
   // Full screen moves the app into the top layer as a modal dialog: the
   // iframe stays where it is in the DOM (moving it would reload the app),
-  // and the top layer escapes any transformed or clipping ancestor.
+  // and the top layer escapes any transformed or clipping ancestor. With
+  // threads side by side it covers the app's own pane; the backdrop dims the rest.
   useLayoutEffect(() => {
     const dialog = dialogRef.current;
     if (dialog === null || typeof dialog.showModal !== "function") return;
@@ -320,7 +323,7 @@ function AppFrame({
       case "height": {
         const next = clampHeight(message.height);
         setHeight(next);
-        // Full screen lays the app out at the viewport's width: not its height in the reply.
+        // Full screen lays the app out at its pane's or the window's width: not its height in the reply.
         if (!fullRef.current) rememberHeight(stateKey, frame.getBoundingClientRect().width, next);
         return;
       }
@@ -376,6 +379,7 @@ function AppFrame({
           "group/app relative m-0 block h-auto w-full max-h-none max-w-none text-foreground",
           full ? "fixed inset-0 flex size-full flex-col rounded-none border-0 bg-background p-4 backdrop:bg-black/40" : CARD,
         )}
+        style={full && bounds !== null ? { ...bounds, right: "auto", bottom: "auto" } : undefined}
       >
         <iframe
           ref={iframeRef}

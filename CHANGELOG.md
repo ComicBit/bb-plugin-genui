@@ -47,6 +47,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   - A diagram drawn here before keeps its height exactly until BB draws it again. Before, its loading placeholder could be taller, so the card shrank twice: once when the font loaded, and again when the diagram came near the screen (BB draws Mermaid only within 256 px of it). A diagram never drawn here keeps its tallest placeholder, so it moves once, when it draws.
   - `Code` and `Snippet` open at the height their code will take. BB's code viewer shows a fixed 128 px placeholder while it highlights, so short code shrank (by 60–78 px for one or two lines) and long code grew (up to 256 px) once drawn. The plugin learns how tall each number of lines is from the code BB has drawn on this device; until it has seen two lengths, nothing is held.
   - `PullRequest()` opens at about its final height: its placeholder has the layout of the title, branches and three facts, instead of two short rows. On a 402 px phone a card holding it grew by 45 px instead of 217 px when GitHub answered.
+- With threads side by side or stacked in BB, a picture, diagram or app opened full screen covers the pane of the thread it came from instead of the whole window across every pane; the rest of the window dims, and a tap there closes a picture or diagram.
 
 ## [0.2.6] - 2026-10-21
 

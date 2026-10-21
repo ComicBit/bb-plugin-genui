@@ -356,7 +356,10 @@ The internals behind [the README](../README.md): how agents learn the language, 
     preview, `preview`. Full screen makes the app's always-displayed
     `<dialog>` modal (`showModal()`): the top layer escapes any transformed
     ancestor without moving the iframe, so the app keeps its document, and
-    an Escape the app doesn't handle is forwarded to close it. *Download as
+    an Escape the app doesn't handle is forwarded to close it. With BB's
+    threads side by side or stacked, the dialog is placed over the app's own
+    pane (`ui/paneBounds.ts`, from BB's `data-split-pane-id` markup) and the
+    backdrop dims the rest; with one pane it fills the window. *Download as
     HTML* saves the same document built standalone: theme and current
     storage baked in, `genui.answer` a no-op, links opening a new tab.
 
@@ -494,7 +497,9 @@ then zooms with the wheel, a trackpad pinch, two fingers or a double tap, and
 pans by dragging; arrows, buttons or a swipe step through the component's
 pictures; Escape, the close button, a tap beside the picture or a swipe down
 closes it. Its caption is the picture's caption or alt, and an Image of a
-file can be opened in BB from there. Touch goes through touch events, not
+file can be opened in BB from there. Like an app's full screen, it covers
+only the block's own pane when BB shows several (a tap on the dimmed rest
+closes it). Touch goes through touch events, not
 pointer events, so a gesture the browser starts (a scroll under two
 fingers) can't cancel it, and cancelling them is what keeps iOS from zooming
 the whole page. The zoom and pan geometry is `zoomMath.ts`, shared with
