@@ -4,7 +4,7 @@ What changed in each version of the Generative UI plugin for BB. Update an insta
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.3.1] - 2026-10-22
 
 ### Fixed
 - Code and Snippet stay drawn after their tab or Details is hidden and shown again. BB's code viewer left a blank box in their place when it came back (BB 0.46 ships @pierre/diffs 1.2.9, fixed upstream in 1.3.0); the plugin now makes a new viewer while it is hidden. Diff was not affected ([#12](https://github.com/ComicBit/bb-plugin-genui/pull/12)).
@@ -121,7 +121,7 @@ Not released separately on GitHub; included in 0.2.2.
 
 First release: agents answer with ```ui blocks (86 components in 10 groups, from cards, tables and charts to maps, boards, roadmaps and quizzes), interactive without extra model calls, reading files instead of retyped numbers, and sandboxed ```app blocks for anything else.
 
-[Unreleased]: https://github.com/ComicBit/bb-plugin-genui/compare/v0.3.0...HEAD
+[0.3.1]: https://github.com/ComicBit/bb-plugin-genui/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/ComicBit/bb-plugin-genui/compare/v0.2.6...v0.3.0
 [0.2.6]: https://github.com/ComicBit/bb-plugin-genui/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/ComicBit/bb-plugin-genui/compare/v0.2.4...v0.2.5
