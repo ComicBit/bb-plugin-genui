@@ -29,6 +29,8 @@ export interface ImageLoader {
   size(src: string): ImageSize | null;
   /** Remembers the natural size `src` decoded at, for `size`. */
   rememberSize(src: string, size: ImageSize): void;
+  /** Drops `src` as this page read it, when the browser couldn't decode it, so the next mount reads it again. */
+  forget(src: string): void;
 }
 
 /** A text file read for a component, or a user-facing reason it couldn't be. */
@@ -54,8 +56,8 @@ export interface UiRuntime {
    */
   loadImage: ImageLoader | null;
   /**
-   * Marks something the UI shows as still arriving (an image being read):
-   * until every mark is released, the block keeps the height it last
+   * Marks something the UI shows as still arriving (an image being read or
+   * decoded): until every mark is released, the block keeps the height it last
    * settled at and remembers no other (reservedHeight.ts). Returns the release.
    */
   holdHeight(): () => void;

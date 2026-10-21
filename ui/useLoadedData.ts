@@ -116,7 +116,8 @@ export function useLoadedData(scope: FileScope, program: Program | null): Readon
  * placeholder that grows when they arrive, and tabs and re-renders don't
  * refetch them. Per block, so a later reply showing a file rewritten at the
  * same path reads it afresh, while an old reply keeps what it showed.
- * Failures are not kept, so a file written later still loads. Bounded by
+ * Failures are not kept, so a file written later still loads, nor pictures
+ * the browser couldn't decode (`forget`). Bounded by
  * the characters held (a data URL can be several MB), most recently used kept.
  */
 const IMAGES = new Map<string, { readonly pending: Promise<ImageUrl>; read: ImageUrl | null }>();
@@ -187,6 +188,13 @@ export function useImageLoader(scope: FileScope, block: string | null = null): I
         if (entry !== null && entry[0] === Math.round(width) && entry[1] === Math.round(height)) return;
         store.set(key, width, height);
         imageSizes.save();
+      },
+      forget: (src: string) => {
+        const key = `${scopeKey}|${src}`;
+        const entry = IMAGES.get(key);
+        if (entry === undefined) return;
+        IMAGES.delete(key);
+        if (entry.read?.ok === true) imageChars -= entry.read.url.length;
       },
     });
   }, [loaders, scopeKey]);

@@ -33,7 +33,7 @@ import { KeyValue } from "./content";
 import { keyValuePairs } from "./content-model";
 import { ErrorLine } from "./display";
 import { CAPTION, FOCUS_RING } from "./inputs";
-import { decodedSize, useReadImage } from "./media";
+import { decodedSize, useHeightHold, useReadImage } from "./media";
 import { FADE, reducedMotion, RISE, SMOOTH_HEIGHT_CLASS, useEntrance, useSmoothHeight } from "./motion";
 import {
   domainOf,
@@ -573,10 +573,14 @@ export function Hotspots({ props }: { props: Props }) {
 
   const url = picture.status === "ready" ? picture.url : null;
   const size = url !== null && natural?.url === url ? natural : null;
+  // Read but not decoded yet: the frame may still have the placeholder's ratio.
+  useHeightHold(url !== null && natural?.url !== url);
   const settle = (ok: boolean, img: HTMLImageElement) => {
     if (url === null || natural?.url === url) return;
     const { naturalWidth, naturalHeight } = img;
     const own = ok ? decodedSize(img) : null;
+    // Not kept for the page, so the block reads the file again when it mounts again.
+    if (!ok && ref.kind === "load") loadImage?.forget(ref.src);
     if (own !== null && ref.kind === "load") loadImage?.rememberSize(ref.src, own);
     // An SVG without width/height has no ratio of its own: keep the frame's.
     setNatural({ url, ratio: !ok ? null : naturalWidth > 0 && naturalHeight > 0 ? naturalWidth / naturalHeight : 16 / 9 });

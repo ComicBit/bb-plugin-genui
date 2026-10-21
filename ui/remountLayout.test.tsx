@@ -183,6 +183,39 @@ describe("a block BB mounts again", () => {
     expect(holder?.style.minHeight).toBe("");
   });
 
+  it("remembers no placeholder's height while a picture it read is still decoding", async () => {
+    // Laid out as the placeholder, until the picture decodes.
+    const box = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 720, 192));
+    renderBlock("page", 'Image("slow.png", "Slow")', [5]);
+    await act(async () => pictures.get("slow.png")?.({ ok: true, dataUrl: "data:image/png;base64,U0xPVw==" }));
+    act(() => root.render(null));
+    // Mounted again, it is shorter for a moment; a remembered height would be held.
+    box.mockReturnValue(new DOMRect(0, 0, 720, 0));
+    renderBlock("page", 'Image("slow.png", "Slow")', [5]);
+    expect(container.querySelector<HTMLElement>("[data-genui-fence] .group\\/genui > div")?.style.minHeight).toBe("");
+
+    box.mockReturnValue(new DOMRect(0, 0, 720, 405));
+    decode(container.querySelector("img")!, 720, 405);
+    act(() => root.render(null));
+    box.mockReturnValue(new DOMRect(0, 0, 720, 0));
+    renderBlock("page", 'Image("slow.png", "Slow")', [5]);
+    expect(container.querySelector<HTMLElement>("[data-genui-fence] .group\\/genui > div")?.style.minHeight).toBe("405px");
+  });
+
+  it("reads a picture again when its block mounts again after the picture failed to decode", async () => {
+    renderBlock("page", 'Image("broken.png")', [6]);
+    await act(async () => pictures.get("broken.png")?.({ ok: true, dataUrl: "data:image/png;base64,QlJPS0VO" }));
+    act(() => {
+      container.querySelector("img")!.dispatchEvent(new Event("error"));
+    });
+    expect(container.textContent).toContain("Couldn't load the image at broken.png");
+    const calls = loadImageCalls();
+
+    act(() => root.render(null));
+    renderBlock("page", 'Image("broken.png")', [6]);
+    expect(loadImageCalls()).toBe(calls + 1);
+  });
+
   it("still ends a reservation the content no longer fills when BB's outline never arrives", async () => {
     vi.useFakeTimers();
     renderBlock("stuck", 'Text("Shorter now")');

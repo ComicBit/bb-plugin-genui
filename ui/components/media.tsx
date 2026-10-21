@@ -48,7 +48,7 @@ function imageTarget(source: Source | null): string | null {
  * A changed target never shows the previous image.
  */
 export function useReadImage(target: string | null): ImageUrl | null {
-  const { loadImage, holdHeight } = useUiRuntime();
+  const { loadImage } = useUiRuntime();
   const [loaded, setLoaded] = useState<{ readonly target: string; readonly image: ImageUrl } | null>(() => {
     const image = target === null ? null : (loadImage?.peek(target) ?? null);
     return target === null || image === null ? null : { target, image };
@@ -66,10 +66,19 @@ export function useReadImage(target: string | null): ImageUrl | null {
       live = false;
     };
   }, [target, loadImage]);
-  // Before the browser lays the block out, so no height of the placeholder is remembered as the block's.
-  useLayoutEffect(() => (waiting ? holdHeight() : undefined), [waiting, holdHeight]);
+  useHeightHold(waiting);
 
   return image;
+}
+
+/**
+ * While `active` (a picture being read or decoded), the block keeps the
+ * height it last settled at and remembers no other (`UiRuntime.holdHeight`).
+ */
+export function useHeightHold(active: boolean): void {
+  const { holdHeight } = useUiRuntime();
+  // Before the browser lays the block out, so no height of the placeholder is remembered as the block's.
+  useLayoutEffect(() => (active ? holdHeight() : undefined), [active, holdHeight]);
 }
 
 /**
@@ -140,6 +149,8 @@ export function Image({ props }: { props: Props }) {
   const { open, viewer } = useViewer(
     url === null ? [] : [{ url, alt, caption: null, path: source.kind === "file" ? source.path : undefined }],
   );
+  // Read but not decoded yet: the box may still be the placeholder.
+  useHeightHold(url !== null && decoded?.url !== url);
 
   if (image.status === "failed") {
     return image.off ? <WebOffLine what="Image" /> : <ErrorLine message={`Couldn't show ${src}: ${image.error}`} />;
@@ -187,7 +198,11 @@ export function Image({ props }: { props: Props }) {
                 alt={alt}
                 decoding="async"
                 onLoad={(event) => onLoad(event.currentTarget)}
-                onError={() => setDecoded({ url, ok: false, size: null })}
+                onError={() => {
+                  // Not kept for the page, so the block reads the file again when it mounts again.
+                  if (target !== null) loadImage?.forget(target);
+                  setDecoded({ url, ok: false, size: null });
+                }}
                 className={cn(
                   "absolute inset-0 size-full object-contain transition-opacity duration-200 motion-reduce:transition-none",
                   ready ? "opacity-100" : "opacity-0",
