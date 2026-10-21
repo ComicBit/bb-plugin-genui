@@ -1,4 +1,5 @@
 import { useContext, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { sameCaption, sourceCaption } from "../../core/source";
 import type { UiNode } from "../../core/types";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
@@ -6,6 +7,7 @@ import { RenderNode, RenderNodes } from "../render";
 import { CardDepthContext } from "../runtime";
 import { finiteNumber, list, nodes, optionalText, text, type Props } from "../values";
 import { RISE, SMOOTH_HEIGHT_CLASS, useEntrance, useSmoothHeight, type Entrance } from "./motion";
+import { SourceLine } from "./source";
 
 /** The frame enters at once; only its rows and items are staggered. */
 const FRAME: Entrance = { ...RISE, stagger: false };
@@ -89,13 +91,20 @@ export function Row({ props }: { props: Props }) {
   const children = nodes(props.children);
   // A row of metrics is a stat strip: an even grid that reflows by width.
   if (children.length > 1 && children.every((child) => child.type === "Metric")) {
+    // Metrics read from one file (or given one source) name it once, under the strip.
+    const captions = children.map((child) => sourceCaption(child.props));
+    const shared = captions[0] !== null && captions.every((caption) => sameCaption(caption, captions[0])) ? captions[0] : null;
+    // One shape with or without the line, so the strip never remounts when it appears.
     return (
-      <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))] gap-x-6 gap-y-4">
-        {children.map((child) => (
-          <RowItem key={child.key} className="min-w-0">
-            <RenderNode node={child} />
-          </RowItem>
-        ))}
+      <div className="flex min-w-0 flex-col gap-2">
+        <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(7.5rem,1fr))] gap-x-6 gap-y-4">
+          {children.map((child) => (
+            <RowItem key={child.key} className="min-w-0">
+              <RenderNode node={child} captioned={shared === null} />
+            </RowItem>
+          ))}
+        </div>
+        {shared === null ? null : <SourceLine caption={shared} />}
       </div>
     );
   }

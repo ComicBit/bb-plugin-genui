@@ -2,18 +2,23 @@
 // their notes (below the map on a phone). Pins and list rows highlight each
 // other; the map fits every place, pans and zooms by drag, pinch, ctrl/⌘ +
 // wheel, double click, buttons and keys, and can join the places in order
-// with a route line. No map library: the projection and tiling are
-// mapMath.ts, tiles and place names come through the backend (web/lookups.ts).
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+// with a route line. For trips: places group by day (a colour each, a
+// legend, a route line per day), a place naming a Wikipedia article shows
+// its credited lead photo on its card, and a tour drops the pins one by one.
+// No map library: the projection, tiling and tour pace are mapMath.ts; tiles,
+// place names and photos come through the backend (web/lookups.ts).
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type RefObject } from "react";
 import { UrlLink, useRpc } from "@get-bb/plugin-sdk/app";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
+import { groupByDay, readPlaces, type MapPlace } from "../../core/map";
 import type { rpcContract } from "../../server";
-import { ACCENT, finiteNumber, isObject, list, optionalText, type Props } from "../values";
+import { list, type Props } from "../values";
 import { useDarkTheme } from "../theme";
-import { cachedTile, geocode, loadTile, type PlaceResult } from "../webLookups";
+import { cachedTile, geocode, loadTile, useWikiPhoto, type PlaceResult } from "../webLookups";
+import { PALETTE } from "./chartKit";
 import { ErrorLine } from "./display";
-import { WebOffLine } from "./media";
+import { useImageUrl, WebOffLine } from "./media";
 import {
   clampView,
   fitView,
@@ -22,32 +27,16 @@ import {
   project,
   tileZoom,
   toScreen,
+  tourStep,
   visibleTiles,
   zoomAround,
   type Point,
   type Size,
   type View,
 } from "./mapMath";
-import { reducedMotion, RISE, useEntrance } from "./motion";
+import { EASE_OUT_EXPO, reducedMotion, RISE, useAnimationsOff, useEntrance } from "./motion";
 import { NO_BB_SWIPE } from "./viewer";
-
-interface Place {
-  readonly name: string;
-  readonly note: string | null;
-  /** Coordinates given in the spec; null when the name has to be looked up. */
-  readonly given: { readonly lat: number; readonly lng: number } | null;
-}
-
-/** A place as written: `{name, lat?, lng?, note?}` or a bare name; null when it has no name. */
-function readPlace(item: unknown): Place | null {
-  const fields: Readonly<Record<string, unknown>> = isObject(item) ? item : { name: item };
-  const name = optionalText(fields.name)?.trim() ?? "";
-  if (name === "") return null;
-  const lat = finiteNumber(fields.lat);
-  const lng = finiteNumber(fields.lng);
-  const valid = lat !== null && lng !== null && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
-  return { name, note: optionalText(fields.note)?.trim() || null, given: valid ? { lat, lng } : null };
-}
+import { Credit, Fill } from "./webMedia";
 
 /** How long the last place must stay unchanged before its name is looked up (it may still be streaming its lat/lng). */
 const SETTLE_MS = 700;
@@ -66,7 +55,7 @@ function lookupKey(name: string): string {
  * nudged toward the places already known (the backend keeps to Photon's
  * one-request-a-second). Results by lowercased name.
  */
-function useLookups(places: readonly (Place | null)[]): ReadonlyMap<string, PlaceResult> {
+function useLookups(places: readonly (MapPlace | null)[]): ReadonlyMap<string, PlaceResult> {
   const rpc = useRpc<typeof rpcContract>();
   const [found, setFound] = useState<ReadonlyMap<string, PlaceResult>>(() => new Map());
   const busy = useRef(false);
@@ -166,28 +155,175 @@ function Backdrop({ view, size, z }: { view: View; size: Size; z: number }) {
   });
 }
 
-const MARKER = "flex shrink-0 items-center justify-center rounded-full font-semibold tabular-nums text-white";
+// A shadow keeps the white number legible on the lighter day colours.
+const MARKER = "flex shrink-0 items-center justify-center rounded-full font-semibold tabular-nums text-white [text-shadow:0_0_2px_rgb(0_0_0/0.45)]";
 const CONTROL =
   "flex size-8 cursor-pointer items-center justify-center bg-background text-foreground transition-colors hover:bg-surface-recessed focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring";
+const TOUR_BUTTON =
+  "flex h-7 cursor-pointer items-center gap-1 bg-background px-2 text-xs font-medium text-foreground transition-colors hover:bg-surface-recessed focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring";
 
 type Gesture =
   | { readonly kind: "press"; readonly id: number; readonly x: number; readonly y: number; readonly view: View }
   | { readonly kind: "drag"; readonly id: number; readonly x: number; readonly y: number; readonly view: View }
   | { readonly kind: "pinch"; readonly distance: number; readonly mid: { left: number; top: number }; readonly view: View };
 
+/** Day colours: the chart palette without its quiet grey (it would read as a stop not found yet), softened past its end. */
+const DAY_COLORS = PALETTE.filter((_, index) => index !== 1);
+
+function dayColor(group: number): string {
+  const color = DAY_COLORS[group % DAY_COLORS.length];
+  return group < DAY_COLORS.length ? color : `color-mix(in oklch, ${color} 50%, var(--background))`;
+}
+
+/** A pin dropping in on a tour: falls from a little above while it fades in. */
+const DROP: Keyframe[] = [
+  { transform: "translateY(-18px)", opacity: 0 },
+  { transform: "none", opacity: 1 },
+];
+const DROP_MS = 420;
+
+/** Plays the drop on a pin wrapper the tour marked as its newest (`data-drop`), once, when it mounts. */
+function dropIn(element: HTMLElement | null): void {
+  if (element?.dataset.drop === "true" && !reducedMotion()) element.animate(DROP, { duration: DROP_MS, easing: EASE_OUT_EXPO });
+}
+
+interface Tour {
+  /** Whether the tour runs at all: asked for, and motion allowed. */
+  readonly active: boolean;
+  /** How many stops, in tour order, have their pins down. */
+  readonly shown: number;
+  readonly started: boolean;
+  readonly paused: boolean;
+  readonly done: boolean;
+  /** Bumped by replay, so the pins mount (and drop) again. */
+  readonly epoch: number;
+  /** When (performance.now()) the newest pin dropped on its own; a seek doesn't count. */
+  readonly droppedAt: number;
+  readonly toggle: () => void;
+  readonly replay: () => void;
+  /** Shows the stops up to `position` and carries on from there. */
+  readonly seek: (position: number) => void;
+}
+
+/**
+ * Drops `count` pins one by one at tourStep's pace, starting once `target`
+ * (the map) is mostly on screen. Only the pins move: the camera and the page
+ * stay where the user left them. Pauses while the page is hidden; reduced
+ * motion or the Animations setting off shows every pin at once.
+ */
+function useTour(wanted: boolean, count: number, target: RefObject<HTMLElement | null>): Tour {
+  const animationsOff = useAnimationsOff();
+  // The system setting has no hook; it's read again on every render.
+  const active = wanted && !animationsOff && !reducedMotion();
+  const [started, setStarted] = useState(false);
+  const [shown, setShown] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const [epoch, setEpoch] = useState(0);
+  const [droppedAt, setDroppedAt] = useState(Number.NEGATIVE_INFINITY);
+  const [hidden, setHidden] = useState(() => document.visibilityState === "hidden");
+
+  useEffect(() => {
+    const update = () => setHidden(document.visibilityState === "hidden");
+    document.addEventListener("visibilitychange", update);
+    return () => document.removeEventListener("visibilitychange", update);
+  }, []);
+
+  useEffect(() => {
+    const element = target.current;
+    if (!active || started || element === null) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        setStarted(true);
+        setShown(1);
+        setDroppedAt(performance.now());
+      },
+      { threshold: 0.6 },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [active, started, target]);
+
+  const running = active && started && !paused && !hidden && shown < count;
+  useEffect(() => {
+    if (!running) return;
+    const timer = setTimeout(() => {
+      setShown((current) => current + 1);
+      setDroppedAt(performance.now());
+    }, tourStep(count));
+    return () => clearTimeout(timer);
+  }, [running, shown, count]);
+
+  return {
+    active,
+    shown: active ? shown : count,
+    started,
+    paused,
+    done: shown >= count,
+    epoch,
+    droppedAt,
+    toggle: () => setPaused((current) => !current),
+    replay: () => {
+      setStarted(true);
+      setShown(1);
+      setPaused(false);
+      setEpoch((current) => current + 1);
+      setDroppedAt(performance.now());
+    },
+    seek: (position) => {
+      setStarted(true);
+      setShown(position + 1);
+    },
+  };
+}
+
+const SKELETON = "animate-pulse bg-surface-recessed motion-reduce:animate-none";
+
+/**
+ * A place's Wikipedia lead photo with its credit, under its card text. The
+ * backend answers only with a photo it can credit; with none, nothing shows.
+ */
+function PlacePhoto({ title, name, onOff }: { title: string; name: string; onOff: () => void }) {
+  const found = useWikiPhoto(title);
+  const photo = found?.ok ? found.photo : null;
+  const image = useImageUrl(photo?.url ?? null);
+  const [broken, setBroken] = useState<string | null>(null);
+  const off = (found !== null && !found.ok && found.off === true) || (image.status === "failed" && image.off);
+  useEffect(() => {
+    if (off) onOff();
+  }, [off, onOff]);
+  if (found === null) return <span aria-hidden className={cn("ml-[38px] mr-2 mb-1.5 block aspect-[16/9] rounded-md", SKELETON)} />;
+  if (photo === null || off) return null;
+  const url = image.status === "ready" ? image.url : null;
+  if (image.status === "failed" || (url !== null && broken === url)) {
+    return <p className="mb-1.5 ml-[38px] mr-2 text-[11px] leading-4 text-muted-foreground">Couldn't load the photo.</p>;
+  }
+  return (
+    <figure className="mb-1.5 ml-[38px] mr-2 flex min-w-0 flex-col gap-1">
+      <div className="relative aspect-[16/9] overflow-hidden rounded-md border border-border bg-surface-recessed">
+        {url === null ? <span aria-hidden className={cn("absolute inset-0", SKELETON)} /> : <Fill url={url} alt={name} onFailed={() => setBroken(url)} />}
+      </div>
+      <figcaption>
+        <Credit image={photo} compact />
+      </figcaption>
+    </figure>
+  );
+}
+
 export function MapView({ props }: { props: Props }) {
   const items = list(props.places);
-  const places = useMemo(() => items.map(readPlace), [items]);
+  const places = useMemo(() => readPlaces(items), [items]);
   const route = props.route === true;
   const lookups = useLookups(places);
   const dark = useDarkTheme();
   const rise = useEntrance<HTMLDivElement>(RISE);
 
   const viewport = useRef<HTMLDivElement>(null);
-  const listRef = useRef<HTMLOListElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<Size | null>(null);
   const [view, setView] = useState<View | null>(null);
-  const [tilesOff, setTilesOff] = useState(false);
+  /** A tile or photo answered that web lookups are off. */
+  const [webOff, setWebOff] = useState(false);
   const [hovered, setHovered] = useState<number | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   /** The level whose tiles finished loading last: drawn as a backdrop while another loads. */
@@ -209,7 +345,17 @@ export function MapView({ props }: { props: Props }) {
   const latestPoints = useRef(points);
   latestPoints.current = points;
   const lookupsOff = [...lookups.values()].some((result) => !result.ok && result.off === true);
-  const off = tilesOff || lookupsOff;
+  const off = webOff || lookupsOff;
+
+  const groups = groupByDay(places);
+  const days = groups.some((group) => group.label !== null);
+  /** Place indexes in the order they're numbered, listed and toured: day by day. */
+  const order = groups.flatMap((group) => group.places);
+  const position = new Map(order.map((index, at) => [index, at]));
+  const groupOf = new Map(groups.flatMap((group, at) => group.places.map((index) => [index, at] as const)));
+  const tour = useTour(props.tour === true && !off, order.length, viewport);
+  /** Whether place `index`'s pin is down (always, without a tour). */
+  const dropped = (index: number) => (position.get(index) ?? Infinity) < tour.shown;
 
   useLayoutEffect(() => {
     const element = viewport.current;
@@ -367,9 +513,15 @@ export function MapView({ props }: { props: Props }) {
     animateTo(fit(size));
   };
 
+  const select = (index: number) => {
+    setSelected(index);
+    const at = position.get(index);
+    if (tour.active && at !== undefined) tour.seek(at);
+  };
+
   const focusPlace = (index: number) => {
     const point = points[index];
-    setSelected(index);
+    select(index);
     if (point === null || size === null || view === null) return;
     moved.current = true;
     animateTo(clampView({ x: point.x, y: point.y, zoom: Math.max(view.zoom, 12) }, size));
@@ -402,20 +554,24 @@ export function MapView({ props }: { props: Props }) {
     if (z === null || tiles.length === 0) return;
     if (tiles.every((tile) => cachedTile(tile.z, tile.x, tile.y) !== null)) setBackdropZ(z);
   });
-  const onTilesOff = useCallback(() => setTilesOff(true), []);
+  const onWebOff = useCallback(() => setWebOff(true), []);
 
-  if (items.length === 0) return <ErrorLine message="Map needs places: {name, lat?, lng?, note?}" />;
+  if (items.length === 0) return <ErrorLine message="Map needs places: {name, lat?, lng?, note?, day?, wiki?}" />;
   const unnamed = places.findIndex((place, index) => place === null && index < places.length - 1);
   const active = hovered ?? selected;
-  const count = places.filter((place) => place !== null).length;
-  const numbers = places.map((_, index) => places.slice(0, index + 1).filter((place) => place !== null).length);
+  const count = order.length;
+  const number = (index: number) => (position.get(index) ?? 0) + 1;
+  const color = (index: number) => dayColor(groupOf.get(index) ?? 0);
   const screen = view === null || size === null ? [] : points.map((point) => (point === null ? null : toScreen(point, view, size)));
-  const routeLine = route
-    ? screen
-        .filter((at) => at !== null)
-        .map((at) => `${at.left.toFixed(1)},${at.top.toFixed(1)}`)
-        .join(" ")
-    : "";
+  // One line per day, through the stops whose pins are down, in order.
+  const routes = route
+    ? groups.flatMap((group, at) => {
+        const stops = group.places.flatMap((index) => (dropped(index) ? (screen[index] ?? []) : []));
+        return stops.length < 2 ? [] : [{ key: at, color: dayColor(at), points: stops.map((stop) => `${stop.left.toFixed(1)},${stop.top.toFixed(1)}`).join(" ") }];
+      })
+    : [];
+  // The pin that just dropped plays its fall when it mounts; one remounted later by a pan doesn't.
+  const dropping = tour.active && performance.now() - tour.droppedAt < DROP_MS ? order[tour.shown - 1] : undefined;
   const tileFilter = dark ? "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.88) saturate(0.6)" : undefined;
 
   return (
@@ -428,143 +584,200 @@ export function MapView({ props }: { props: Props }) {
             <WebOffLine what="Map" />
           </div>
         ) : (
-          <div
-            ref={viewport}
-            role="region"
-            aria-roledescription="map"
-            aria-label={`Map of ${count} ${count === 1 ? "place" : "places"}. Arrow keys pan, plus and minus zoom, 0 shows every place.`}
-            tabIndex={0}
-            onKeyDown={onKeyDown}
-            {...NO_BB_SWIPE}
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerEnd}
-            onPointerCancel={onPointerEnd}
-            onDoubleClick={(event) => {
-              if (view === null || size === null || event.target !== event.currentTarget) return;
-              moved.current = true;
-              animateTo(zoomAround(view, Math.round(view.zoom) + 1, local(event), size));
-            }}
-            className="relative h-64 min-w-0 cursor-grab touch-none select-none overflow-hidden rounded-lg border border-border bg-surface-recessed focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring active:cursor-grabbing @md:h-80 @xl:h-[22rem] @xl:flex-1"
-          >
-            <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden" style={{ filter: tileFilter }}>
-              {view !== null && size !== null && backdropZ !== null && backdropZ !== z && Math.abs(backdropZ - (z ?? 0)) <= 2 ? (
-                <Backdrop view={view} size={size} z={backdropZ} />
-              ) : null}
-              {tiles.map((tile) => (
-                <MapTile key={tile.key} z={tile.z} x={tile.x} y={tile.y} left={tile.left} top={tile.top} size={tile.size} onOff={onTilesOff} />
-              ))}
-            </div>
-            {routeLine === "" ? null : (
-              <svg aria-hidden className="pointer-events-none absolute inset-0 size-full">
-                <polyline points={routeLine} fill="none" stroke="var(--background)" strokeWidth={6} strokeLinejoin="round" strokeLinecap="round" opacity={0.9} />
-                <polyline points={routeLine} fill="none" stroke={ACCENT} strokeWidth={3} strokeLinejoin="round" strokeLinecap="round" />
-              </svg>
-            )}
-            {screen.map((at, index) => {
-              const place = places[index];
-              if (at === null || place === null || size === null) return null;
-              if (at.left < -20 || at.top < -20 || at.left > size.width + 20 || at.top > size.height + 20) return null;
-              const on = active === index;
-              return (
-                <button
-                  key={index}
-                  type="button"
-                  aria-label={`${numbers[index]}. ${place.name}`}
-                  aria-pressed={selected === index}
-                  onClick={() => {
-                    setSelected(index);
-                    listRef.current?.querySelector(`[data-place="${index}"]`)?.scrollIntoView({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
-                  }}
-                  onPointerEnter={() => setHovered(index)}
-                  onPointerLeave={() => setHovered(null)}
-                  onFocus={() => setHovered(index)}
-                  onBlur={() => setHovered(null)}
-                  className={cn(
-                    MARKER,
-                    "absolute size-6 -translate-x-1/2 -translate-y-1/2 cursor-pointer text-[11px] shadow-[0_1px_3px_rgb(0_0_0/0.35)] ring-2 ring-background transition-transform duration-150 focus-visible:outline-none motion-reduce:transition-none",
-                    on ? "z-10 scale-125 ring-[3px]" : "hover:scale-110",
-                  )}
-                  style={{ left: at.left, top: at.top, background: ACCENT }}
-                >
-                  {numbers[index]}
+          <div className="flex min-w-0 flex-col gap-1.5 @xl:flex-1">
+            <div
+              ref={viewport}
+              role="region"
+              aria-roledescription="map"
+              aria-label={`Map of ${count} ${count === 1 ? "place" : "places"}. Arrow keys pan, plus and minus zoom, 0 shows every place.`}
+              tabIndex={0}
+              onKeyDown={onKeyDown}
+              {...NO_BB_SWIPE}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerEnd}
+              onPointerCancel={onPointerEnd}
+              onDoubleClick={(event) => {
+                if (view === null || size === null || event.target !== event.currentTarget) return;
+                moved.current = true;
+                animateTo(zoomAround(view, Math.round(view.zoom) + 1, local(event), size));
+              }}
+              className="relative h-64 min-w-0 cursor-grab touch-none select-none overflow-hidden rounded-lg border border-border bg-surface-recessed focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring active:cursor-grabbing @md:h-80 @xl:h-[22rem]"
+            >
+              <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden" style={{ filter: tileFilter }}>
+                {view !== null && size !== null && backdropZ !== null && backdropZ !== z && Math.abs(backdropZ - (z ?? 0)) <= 2 ? (
+                  <Backdrop view={view} size={size} z={backdropZ} />
+                ) : null}
+                {tiles.map((tile) => (
+                  <MapTile key={tile.key} z={tile.z} x={tile.x} y={tile.y} left={tile.left} top={tile.top} size={tile.size} onOff={onWebOff} />
+                ))}
+              </div>
+              {routes.length === 0 ? null : (
+                <svg aria-hidden className="pointer-events-none absolute inset-0 size-full">
+                  {routes.map((line) => (
+                    <g key={line.key}>
+                      <polyline points={line.points} fill="none" stroke="var(--background)" strokeWidth={6} strokeLinejoin="round" strokeLinecap="round" opacity={0.9} />
+                      <polyline points={line.points} fill="none" stroke={line.color} strokeWidth={3} strokeLinejoin="round" strokeLinecap="round" />
+                    </g>
+                  ))}
+                </svg>
+              )}
+              {screen.map((at, index) => {
+                const place = places[index];
+                if (at === null || place === null || size === null || !dropped(index)) return null;
+                if (at.left < -20 || at.top < -20 || at.left > size.width + 20 || at.top > size.height + 20) return null;
+                const on = active === index;
+                return (
+                  // The wrapper carries the position and the drop, so neither fights the pin's own centring and scale.
+                  <div
+                    key={`${index}-${tour.epoch}`}
+                    ref={dropIn}
+                    data-drop={dropping === index ? "true" : undefined}
+                    className={cn("absolute", on && "z-10")}
+                    style={{ left: at.left, top: at.top }}
+                  >
+                    <button
+                      type="button"
+                      aria-label={`${number(index)}. ${place.name}${place.day === null ? "" : `, ${place.day}`}`}
+                      aria-pressed={selected === index}
+                      onClick={() => {
+                        select(index);
+                        listRef.current?.querySelector(`[data-place="${index}"]`)?.scrollIntoView({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
+                      }}
+                      onPointerEnter={() => setHovered(index)}
+                      onPointerLeave={() => setHovered(null)}
+                      onFocus={() => setHovered(index)}
+                      onBlur={() => setHovered(null)}
+                      className={cn(
+                        MARKER,
+                        "absolute left-0 top-0 size-6 -translate-x-1/2 -translate-y-1/2 cursor-pointer text-[11px] shadow-[0_1px_3px_rgb(0_0_0/0.35)] ring-2 ring-background transition-transform duration-150 focus-visible:outline-none motion-reduce:transition-none",
+                        on ? "scale-125 ring-[3px]" : "hover:scale-110",
+                      )}
+                      style={{ background: color(index) }}
+                    >
+                      {number(index)}
+                    </button>
+                  </div>
+                );
+              })}
+              <div className="absolute right-2 top-2 flex flex-col overflow-hidden rounded-md border border-border shadow-[0_1px_2px_rgb(0_0_0/0.08)]">
+                <button type="button" aria-label="Zoom in" title="Zoom in" onClick={() => zoomBy(1)} disabled={view !== null && view.zoom >= MAX_ZOOM} className={CONTROL}>
+                  <Icon name="Plus" className="size-4" />
                 </button>
-              );
-            })}
-            <div className="absolute right-2 top-2 flex flex-col overflow-hidden rounded-md border border-border shadow-[0_1px_2px_rgb(0_0_0/0.08)]">
-              <button type="button" aria-label="Zoom in" title="Zoom in" onClick={() => zoomBy(1)} disabled={view !== null && view.zoom >= MAX_ZOOM} className={CONTROL}>
-                <Icon name="Plus" className="size-4" />
-              </button>
-              <button type="button" aria-label="Zoom out" title="Zoom out" onClick={() => zoomBy(-1)} className={cn(CONTROL, "border-y border-border")}>
-                <Icon name="Minus" className="size-4" />
-              </button>
-              <button type="button" aria-label="Show every place" title="Show every place" onClick={showAll} className={CONTROL}>
-                <Icon name="Maximize2" className="size-4" />
-              </button>
+                <button type="button" aria-label="Zoom out" title="Zoom out" onClick={() => zoomBy(-1)} className={cn(CONTROL, "border-y border-border")}>
+                  <Icon name="Minus" className="size-4" />
+                </button>
+                <button type="button" aria-label="Show every place" title="Show every place" onClick={showAll} className={CONTROL}>
+                  <Icon name="Maximize2" className="size-4" />
+                </button>
+              </div>
+              {tour.active && tour.started ? (
+                <div className="absolute bottom-2 left-2 flex overflow-hidden rounded-md border border-border shadow-[0_1px_2px_rgb(0_0_0/0.08)]">
+                  {tour.done ? null : (
+                    <button type="button" aria-label={tour.paused ? "Resume the tour" : "Pause the tour"} onClick={tour.toggle} className={cn(TOUR_BUTTON, "border-r border-border")}>
+                      <Icon name={tour.paused ? "Play" : "Pause"} aria-hidden className="size-3.5" />
+                      {tour.paused ? "Resume" : "Pause"}
+                    </button>
+                  )}
+                  <button type="button" aria-label="Replay the tour" onClick={tour.replay} className={TOUR_BUTTON}>
+                    <Icon name="RotateCcw" aria-hidden className="size-3.5" />
+                    Replay
+                  </button>
+                </div>
+              ) : null}
+              <p className="absolute bottom-0 right-0 m-0 rounded-tl-md bg-background/85 px-1.5 py-0.5 text-[10px] leading-4 text-muted-foreground">
+                ©{" "}
+                <UrlLink href="https://www.openstreetmap.org/copyright" className="underline-offset-2 hover:text-foreground hover:underline">
+                  OpenStreetMap
+                </UrlLink>{" "}
+                contributors
+              </p>
             </div>
-            <p className="absolute bottom-0 right-0 m-0 rounded-tl-md bg-background/85 px-1.5 py-0.5 text-[10px] leading-4 text-muted-foreground">
-              ©{" "}
-              <UrlLink href="https://www.openstreetmap.org/copyright" className="underline-offset-2 hover:text-foreground hover:underline">
-                OpenStreetMap
-              </UrlLink>{" "}
-              contributors
-            </p>
+            {days || routes.length > 0 ? (
+              <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 px-0.5 text-[11px] leading-4 text-muted-foreground">
+                {days ? (
+                  <ul aria-label="Days" className="m-0 flex list-none flex-wrap items-center gap-x-3 gap-y-1 p-0">
+                    {groups.map((group, at) =>
+                      group.label === null ? null : (
+                        <li key={at} className="flex items-center gap-1.5">
+                          <span aria-hidden className="size-2 rounded-full" style={{ background: dayColor(at) }} />
+                          {group.label}
+                        </li>
+                      ),
+                    )}
+                  </ul>
+                ) : null}
+                {routes.length === 0 ? null : (
+                  <span>{routes.length === 1 ? "The line joins the stops in order; it isn't directions." : "Each line joins a day's stops in order; they aren't directions."}</span>
+                )}
+              </div>
+            ) : null}
           </div>
         )}
-        <ol
-          ref={listRef}
-          className={cn("m-0 flex min-w-0 list-none flex-col gap-0.5 p-0", !off && "@xl:max-h-[22rem] @xl:w-60 @xl:shrink-0 @xl:overflow-y-auto")}
-        >
-          {places.map((place, index) => {
-            if (place === null) return null;
-            const result = place.given === null ? lookups.get(lookupKey(place.name)) : undefined;
-            // The backend says "couldn't find …" for a real miss; anything else is the lookup failing.
-            const status =
-              place.given !== null || result?.ok
-                ? null
-                : result === undefined
-                  ? off
-                    ? null
-                    : "Locating…"
-                  : result.off === true
-                    ? null
-                    : result.error.startsWith("couldn't find")
-                      ? "Not found on the map"
-                      : "Couldn't look this place up";
-            const on = active === index;
-            return (
-              <li key={index} data-place={index}>
-                <button
-                  type="button"
-                  aria-pressed={selected === index}
-                  onClick={() => focusPlace(index)}
-                  onPointerEnter={() => setHovered(index)}
-                  onPointerLeave={() => setHovered(null)}
-                  onFocus={() => setHovered(index)}
-                  onBlur={() => setHovered(null)}
-                  className={cn(
-                    "flex w-full min-w-0 cursor-pointer items-start gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-                    on ? "bg-surface-recessed" : "hover:bg-surface-recessed",
-                  )}
-                >
-                  <span
-                    className={cn(MARKER, "mt-px size-5 text-[10px] transition-opacity", points[index] === null && "opacity-45")}
-                    style={{ background: ACCENT }}
-                  >
-                    {numbers[index]}
-                  </span>
-                  <span className="flex min-w-0 flex-col gap-0.5">
-                    <span className="text-sm font-medium leading-5 text-foreground [overflow-wrap:anywhere]">{place.name}</span>
-                    {place.note === null ? null : <span className="text-xs leading-4 text-muted-foreground">{place.note}</span>}
-                    {status === null ? null : (
-                      <span className={cn("text-[11px] leading-4 text-muted-foreground", status === "Locating…" && "animate-pulse motion-reduce:animate-none")}>{status}</span>
-                    )}
-                  </span>
-                </button>
-              </li>
-            );
-          })}
-        </ol>
+        <div ref={listRef} className={cn("flex min-w-0 flex-col gap-2", !off && "@xl:max-h-[22rem] @xl:w-60 @xl:shrink-0 @xl:overflow-y-auto")}>
+          {groups.map((group, at) => (
+            <section key={at} aria-label={group.label ?? undefined} className="flex min-w-0 flex-col gap-0.5">
+              {group.label === null ? null : (
+                <h4 className="m-0 flex items-center gap-1.5 px-2 pt-0.5 text-[11px] font-medium uppercase leading-4 tracking-wide text-muted-foreground">
+                  <span aria-hidden className="size-2 rounded-full" style={{ background: dayColor(at) }} />
+                  {group.label}
+                </h4>
+              )}
+              <ol start={number(group.places[0])} className="m-0 flex min-w-0 list-none flex-col gap-0.5 p-0">
+                {group.places.map((index) => {
+                  const place = places[index]!;
+                  const result = place.given === null ? lookups.get(lookupKey(place.name)) : undefined;
+                  // The backend says "couldn't find …" for a real miss; anything else is the lookup failing.
+                  const status =
+                    place.given !== null || result?.ok
+                      ? null
+                      : result === undefined
+                        ? off
+                          ? null
+                          : "Locating…"
+                        : result.off === true
+                          ? null
+                          : result.error.startsWith("couldn't find")
+                            ? "Not found on the map"
+                            : "Couldn't look this place up";
+                  const on = active === index;
+                  return (
+                    <li key={index} data-place={index}>
+                      <button
+                        type="button"
+                        aria-pressed={selected === index}
+                        onClick={() => focusPlace(index)}
+                        onPointerEnter={() => setHovered(index)}
+                        onPointerLeave={() => setHovered(null)}
+                        onFocus={() => setHovered(index)}
+                        onBlur={() => setHovered(null)}
+                        className={cn(
+                          "flex w-full min-w-0 cursor-pointer items-start gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                          on ? "bg-surface-recessed" : "hover:bg-surface-recessed",
+                        )}
+                      >
+                        <span
+                          className={cn(MARKER, "mt-px size-5 text-[10px] transition-opacity", (points[index] === null || !dropped(index)) && "opacity-45")}
+                          style={{ background: color(index) }}
+                        >
+                          {number(index)}
+                        </span>
+                        <span className="flex min-w-0 flex-col gap-0.5">
+                          <span className="text-sm font-medium leading-5 text-foreground [overflow-wrap:anywhere]">{place.name}</span>
+                          {place.note === null ? null : <span className="text-xs leading-4 text-muted-foreground">{place.note}</span>}
+                          {status === null ? null : (
+                            <span className={cn("text-[11px] leading-4 text-muted-foreground", status === "Locating…" && "animate-pulse motion-reduce:animate-none")}>{status}</span>
+                          )}
+                        </span>
+                      </button>
+                      {place.wiki === null || off ? null : <PlacePhoto title={place.wiki} name={place.name} onOff={onWebOff} />}
+                    </li>
+                  );
+                })}
+              </ol>
+            </section>
+          ))}
+        </div>
       </div>
     </div>
   );

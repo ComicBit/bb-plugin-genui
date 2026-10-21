@@ -1,5 +1,4 @@
 $tags = ["bug", "upload"]
-Card("Labels for this issue", [
-  ListEditor($tags, label: "Labels", placeholder: "Add a label"),
-  Button("Apply labels", Send("Label the issue: " + $tags.join(", ")))
-])
+Card("Labels for this issue", [Form([
+  ListEditor($tags, label: "Labels", placeholder: "Add a label")
+])])

@@ -18,6 +18,7 @@ export function SlotFence({ code, language, status, index, message, Original }: 
         stateKey={`bb.genui.state:${message.id}#${language}#${index}`}
         threadId={message.threadId}
         messageId={message.id}
+        fence={index}
         actions={actions}
       />
     </div>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compile, evaluate, formatDiagnostics, imageSearches, initialState, toMarkdown, toMarkdownWithImages, type SearchedImage } from "./index";
+import { compile, evaluate, formatDiagnostics, imageSearches, initialState, toMarkdown, toMarkdownWithImages, wikiPhotos, type SearchedImage } from "./index";
 import type { UiNode } from "./types";
 
 function roots(source: string): UiNode[] {
@@ -68,6 +68,32 @@ describe("Map markdown", () => {
   it("ignores out-of-range coordinates and leaves out the route line by default", () => {
     expect(toMarkdown(roots('Map([{name: "Nowhere", lat: 120, lng: 10}])'))).toBe(
       "1. **Nowhere** · [OpenStreetMap](https://www.openstreetmap.org/search?query=Nowhere)",
+    );
+  });
+
+  it("groups places by day (a day carries on until the next), routes each day, and credits Wikipedia photos", () => {
+    const ui = roots(
+      [
+        "Map([",
+        '  {name: "Belém Tower", lat: 38.6916, lng: -9.2160, day: 1, wiki: "Belém Tower"},',
+        '  {name: "Jerónimos", lat: 38.6979, lng: -9.2068, wiki: "Jerónimos Monastery"},',
+        '  {name: "Pena Palace", lat: 38.7876, lng: -9.3906, day: "Sat in Sintra", wiki: "Pena Palace"},',
+        '  {name: "Dinner", lat: 38.6979, lng: -9.4215, day: 1}',
+        "], route: true)",
+      ].join("\n"),
+    );
+    expect(wikiPhotos(ui)).toEqual(["Belém Tower", "Jerónimos Monastery", "Pena Palace"]);
+    const tower: SearchedImage = { ...lamb, url: "https://upload.wikimedia.org/tower.jpg", creator: "Alvesgaspar" };
+    // Jerónimos has no photo we can credit; Pena's lookup hasn't answered.
+    expect(toMarkdownWithImages(ui, new Map(), new Map([["Belém Tower", tower], ["Jerónimos Monastery", null]]))).toBe(
+      "**Day 1** · Route: Belém Tower → Jerónimos → Dinner\n\n" +
+        "1. **Belém Tower** · [OpenStreetMap](https://www.openstreetmap.org/?mlat=38.6916&mlon=-9.216#map=15/38.6916/-9.216)  \n" +
+        "   ![Belém Tower](https://upload.wikimedia.org/tower.jpg)  \n" +
+        "   _Photo: Alvesgaspar, CC BY-SA 4.0, [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Lamb_%281%29.jpg)_\n" +
+        "2. **Jerónimos** · [OpenStreetMap](https://www.openstreetmap.org/?mlat=38.6979&mlon=-9.2068#map=15/38.6979/-9.2068)\n" +
+        "3. **Dinner** · [OpenStreetMap](https://www.openstreetmap.org/?mlat=38.6979&mlon=-9.4215#map=15/38.6979/-9.4215)\n\n" +
+        "**Sat in Sintra**\n\n" +
+        "4. **Pena Palace** · [OpenStreetMap](https://www.openstreetmap.org/?mlat=38.7876&mlon=-9.3906#map=15/38.7876/-9.3906)",
     );
   });
 });

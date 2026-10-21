@@ -75,27 +75,21 @@ describe("planMessage", () => {
   const all = [true, true, true, true];
 
   it("approves the whole plan in one sentence", () => {
-    expect(planMessage(STEPS, all, "")).toBe("Go ahead with the plan.");
-    expect(planMessage(STEPS, all, "  ")).toBe("Go ahead with the plan.");
-  });
-
-  it("adds the note", () => {
-    expect(planMessage(STEPS, all, " Use a token bucket. ")).toBe("Go ahead with the plan. Note: Use a token bucket.");
+    expect(planMessage(STEPS, all)).toBe("Go ahead with the plan.");
   });
 
   it("names the steps to do and the skipped ones with their titles", () => {
-    expect(planMessage(STEPS, [true, true, false, true], "")).toBe("Go ahead with steps 1, 2 and 4. Skip 3 (Migrate the old rows).");
-    expect(planMessage(STEPS, [true, false, false, true], "keep it small")).toBe(
-      "Go ahead with steps 1 and 4. Skip 2 (Wire it into Photon) and 3 (Migrate the old rows). Note: keep it small",
+    expect(planMessage(STEPS, [true, true, false, true])).toBe("Go ahead with steps 1, 2 and 4. Skip 3 (Migrate the old rows).");
+    expect(planMessage(STEPS, [true, false, false, true])).toBe(
+      "Go ahead with steps 1 and 4. Skip 2 (Wire it into Photon) and 3 (Migrate the old rows).",
     );
-    expect(planMessage(STEPS, [false, false, true, false], "")).toBe(
+    expect(planMessage(STEPS, [false, false, true, false])).toBe(
       "Go ahead with step 3. Skip 1 (Add the limiter), 2 (Wire it into Photon) and 4 (Document it).",
     );
   });
 
-  it("holds the plan when nothing is checked, and sends nothing without a note", () => {
-    expect(planMessage(STEPS, [false, false, false, false], "")).toBe("");
-    expect(planMessage(STEPS, [false, false, false, false], "Let's talk first")).toBe("Don't start the plan yet. Note: Let's talk first");
+  it("approves nothing when nothing is checked", () => {
+    expect(planMessage(STEPS, [false, false, false, false])).toBe("");
   });
 
   it("reads runs of three or more steps as ranges", () => {
@@ -106,7 +100,7 @@ describe("planMessage", () => {
   });
 
   it("treats missing checks (a step streamed in after the state was saved) as checked", () => {
-    expect(planMessage(STEPS, [true, true], "")).toBe("Go ahead with the plan.");
+    expect(planMessage(STEPS, [true, true])).toBe("Go ahead with the plan.");
   });
 });
 

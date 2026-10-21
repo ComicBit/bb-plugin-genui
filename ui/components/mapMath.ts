@@ -1,7 +1,7 @@
 // Web Mercator math for Map: places to world coordinates, the view that fits
-// them, panning and zooming about a point, and the OpenStreetMap tiles a view
-// needs. World coordinates run 0..1 across and down; a view is the world
-// point at the viewport's centre and a fractional zoom.
+// them, panning and zooming about a point, the OpenStreetMap tiles a view
+// needs, and the pace of a tour. World coordinates run 0..1 across and down;
+// a view is the world point at the viewport's centre and a fractional zoom.
 
 export const TILE_SIZE = 256;
 export const MIN_ZOOM = 1;
@@ -130,4 +130,15 @@ export function visibleTiles(view: View, size: Size, z = tileZoom(view)): Tile[]
     }
   }
   return tiles;
+}
+
+/** A tour drops every pin in about this long, however many places there are (within the step limits). */
+export const TOUR_MS = 6000;
+/** Fewer places don't crawl, many don't flicker past. */
+const TOUR_STEP_MIN_MS = 300;
+const TOUR_STEP_MAX_MS = 1500;
+
+/** The time between two pins of a tour of `count` places: the first drops at once, the last about TOUR_MS later. */
+export function tourStep(count: number): number {
+  return clamp(TOUR_MS / Math.max(1, count - 1), TOUR_STEP_MIN_MS, TOUR_STEP_MAX_MS);
 }

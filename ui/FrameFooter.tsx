@@ -2,7 +2,9 @@
 // a Source toggle that shows only on hover, so replies read quiet; the
 // gallery names each example in a footer with Source, Copy and Open. Both
 // open the same source panel: the spec with numbered lines in BB's code
-// viewer, the files it reads, and its diagnostics.
+// viewer, the files it reads, and its diagnostics. A ```ui block also gets
+// "Copy as markdown": the block's plain-markdown form (core/markdown.ts) with
+// the values the user moved, built only when clicked.
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { experimental_SourceCode as HostSourceCode } from "@get-bb/plugin-sdk/app";
@@ -45,26 +47,38 @@ export function exampleTitle(example: GalleryExample): string {
   return `${example.component}, ${variantName(example.variant)}`;
 }
 
-/** Copies `text`; the icon shows a check for a moment after it worked. */
-function useCopy(text: string): { copied: boolean; copy(): void } {
+/**
+ * Copies what `text()` returns, read only on click; the icon shows a check
+ * for a moment after it worked. `what` names it in the toasts.
+ */
+function useCopy(text: () => string, what: { done: string; failed: string }): { copied: boolean; copy(): void } {
   const [copied, setCopied] = useState(false);
   const timer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(timer.current), []);
   return {
     copied,
     copy() {
-      navigator.clipboard.writeText(text).then(
-        () => {
-          toast.success("Source copied");
-          setCopied(true);
-          window.clearTimeout(timer.current);
-          timer.current = window.setTimeout(() => setCopied(false), 1500);
-        },
-        (cause: unknown) => toast.error(`Couldn't copy the source: ${cause instanceof Error ? cause.message : String(cause)}`),
-      );
+      const failed = (cause: unknown) => toast.error(`${what.failed}: ${cause instanceof Error ? cause.message : String(cause)}`);
+      // Written while the click is still running: Safari refuses clipboard writes after it.
+      let written: Promise<void>;
+      try {
+        written = navigator.clipboard.writeText(text());
+      } catch (cause) {
+        failed(cause);
+        return;
+      }
+      written.then(() => {
+        toast.success(what.done);
+        setCopied(true);
+        window.clearTimeout(timer.current);
+        timer.current = window.setTimeout(() => setCopied(false), 1500);
+      }, failed);
     },
   };
 }
+
+const SOURCE_COPY = { done: "Source copied", failed: "Couldn't copy the source" };
+const MARKDOWN_COPY = { done: "Copied as markdown", failed: "Couldn't copy as markdown" };
 
 const FOCUS = "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
@@ -77,8 +91,9 @@ const ACTION_LABEL = "sr-only @lg:not-sr-only";
 
 /**
  * The gallery's footer under one example: what it is on the left, Source,
- * Copy and Open on the right. Its height never changes; Source opens the
- * panel below it, inside one bordered box with the footer as its header.
+ * Copy, Markdown and Open on the right. Its height never changes; Source
+ * opens the panel below it, inside one bordered box with the footer as its
+ * header.
  */
 export function GalleryFooter({
   example,
@@ -86,16 +101,19 @@ export function GalleryFooter({
   language,
   files,
   diagnostics,
+  markdown,
 }: {
   example: GalleryExample;
   source: string;
   language: SourceLanguage;
   files: readonly SourceFile[];
   diagnostics: readonly Diagnostic[];
+  /** The block as markdown at its current values; ```ui blocks only. */
+  markdown?: () => string;
 }) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
-  const { copied, copy } = useCopy(source);
+  const { copied, copy } = useCopy(() => source, SOURCE_COPY);
   return (
     <div
       className={cn(
@@ -136,6 +154,7 @@ export function GalleryFooter({
             <Icon name={copied ? "Check" : "Copy"} aria-hidden className="size-3.5" />
             <span className={ACTION_LABEL}>Copy</span>
           </button>
+          {markdown === undefined ? null : <GalleryMarkdownCopy markdown={markdown} />}
           {example.open === null ? null : (
             <button type="button" title="Show this example alone" onClick={example.open} className={ACTION}>
               <Icon name="ArrowUpRight" aria-hidden className="size-3.5" />
@@ -158,36 +177,63 @@ export function GalleryFooter({
   );
 }
 
-/** A reply's Source toggle: hidden until the reply is hovered or the toggle focused, then the panel under it. */
+/** The gallery footer's "Copy as markdown" action. */
+function GalleryMarkdownCopy({ markdown }: { markdown: () => string }) {
+  const { copied, copy } = useCopy(markdown, MARKDOWN_COPY);
+  return (
+    <button
+      type="button"
+      aria-label="Copy as markdown"
+      title="Copy as markdown, with the values as they are now"
+      onClick={copy}
+      className={ACTION}
+    >
+      <Icon name={copied ? "Check" : "FileText"} aria-hidden className="size-3.5" />
+      <span className={ACTION_LABEL}>Markdown</span>
+    </button>
+  );
+}
+
+/** The reply's quiet actions under a UI: hidden at rest, shown while the reply is hovered or the action focused. */
+const REPLY_ACTION = cn(
+  "inline-flex cursor-pointer items-center gap-1 rounded-sm text-[11px] text-subtle-foreground transition-opacity duration-150 hover:text-foreground focus-visible:opacity-100 group-hover/genui:opacity-100 [@media(hover:none)]:opacity-100",
+  FOCUS,
+);
+
+/**
+ * A reply's Source toggle, and for ```ui blocks a "Copy as markdown" action
+ * beside it: hidden until the reply is hovered or one is focused, then the
+ * source panel under them.
+ */
 export function ReplySource({
   source,
   language,
   files,
   diagnostics,
+  markdown,
 }: {
   source: string;
   language: SourceLanguage;
   files: readonly SourceFile[];
   diagnostics: readonly Diagnostic[];
+  /** The block as markdown at its current values; ```ui blocks only. */
+  markdown?: () => string;
 }) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
-  const { copied, copy } = useCopy(source);
+  const { copied, copy } = useCopy(() => source, SOURCE_COPY);
   const lines = source.replace(/\n$/, "").split("\n").length;
   return (
     <>
-      <div className="-mt-2 flex justify-end">
+      <div className="-mt-2 flex justify-end gap-3">
+        {markdown === undefined ? null : <ReplyMarkdownCopy markdown={markdown} shown={open} />}
         <button
           type="button"
           aria-expanded={open}
           aria-controls={panelId}
           onClick={() => setOpen((shown) => !shown)}
-          className={cn(
-            "inline-flex cursor-pointer items-center gap-1 rounded-sm text-[11px] text-subtle-foreground transition-opacity duration-150 hover:text-foreground focus-visible:opacity-100 group-hover/genui:opacity-100 [@media(hover:none)]:opacity-100",
-            // Quiet at rest; once open, the way to close it stays in view.
-            open ? "opacity-100" : "opacity-0",
-            FOCUS,
-          )}
+          // Quiet at rest; once open, the way to close it stays in view.
+          className={cn(REPLY_ACTION, open ? "opacity-100" : "opacity-0")}
         >
           <Icon name="Code" aria-hidden className="size-3" />
           {open ? "Hide source" : "Source"}
@@ -229,6 +275,22 @@ export function ReplySource({
         </div>
       ) : null}
     </>
+  );
+}
+
+/** The reply's "Copy as markdown" action; `shown` keeps it in view while the source panel is open. */
+function ReplyMarkdownCopy({ markdown, shown }: { markdown: () => string; shown: boolean }) {
+  const { copied, copy } = useCopy(markdown, MARKDOWN_COPY);
+  return (
+    <button
+      type="button"
+      title="Copy this UI as markdown, with the values as they are now"
+      onClick={copy}
+      className={cn(REPLY_ACTION, shown || copied ? "opacity-100" : "opacity-0")}
+    >
+      <Icon name={copied ? "Check" : "FileText"} aria-hidden className="size-3" />
+      Copy as markdown
+    </button>
   );
 }
 

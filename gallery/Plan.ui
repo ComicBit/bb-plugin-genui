@@ -6,4 +6,4 @@ Plan([
   {title: "Show “rate limited, retrying” in Map and ImageSearch", files: ["ui/components/Map.tsx", "ui/components/webMedia.tsx"], risk: "low", estimate: "2h", optional: true},
   {title: "Tests: bucket timing with fake timers, Retry-After parsing", files: ["web/web.test.ts"], risk: "low", estimate: "1.5h"},
   {title: "Document the limits in the README", files: ["README.md:94"], estimate: "20m"}
-], submit: "Approve plan")
+])

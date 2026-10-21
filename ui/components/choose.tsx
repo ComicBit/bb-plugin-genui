@@ -16,11 +16,11 @@ import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import { resolveIconName } from "../icons";
 import { RenderNode } from "../render";
-import { CardDepthContext, useUiRuntime } from "../runtime";
+import { CardDepthContext, NodeKeyContext, sentFor, useAnswers, useUiRuntime } from "../runtime";
 import { isBinding, list, nodes, optionalText, type Props } from "../values";
 import { cardOptions, followUpPrompts, sameColor, swatchColors, togglePick, type CardOption } from "./choose-logic";
 import { CheckMark, ErrorLine } from "./display";
-import { CAPTION, SentLine, useClosedChoices } from "./inputs";
+import { CAPTION, InMessageLine, SentLine, useClosedChoices } from "./inputs";
 import { useImageUrl, type ImageState } from "./media";
 import { reducedMotion, RISE, useEntrance } from "./motion";
 import { ExpandButton, useGroupPicture, ViewerGroup } from "./viewer";
@@ -382,57 +382,67 @@ function SwatchChip({
 // ── FollowUps ────────────────────────────────────────────────────────────────
 
 /**
- * Suggested next questions as quiet rows; a tap sends one as the user's
- * message. Like a ButtonGroup's choices, they fold away once this UI sent an
- * answer (leaving a "sent" line when it was one of them) or the thread moved on.
+ * Suggested next questions as quiet rows, and one question: a tap puts the
+ * prompt in the user's message (single-select: tap again to take it out,
+ * another to switch). Like a ButtonGroup's choices, they fold away once sent
+ * (leaving a "sent" line) or once the thread moved on.
  */
 export function FollowUps({ props }: { props: Props }) {
-  const { run, answer } = useUiRuntime();
-  const { closed, gone } = useClosedChoices();
-  const [running, setRunning] = useState(false);
+  const { staged, sent, stage } = useAnswers();
+  const question = useContext(NodeKeyContext);
+  const { closed, gone } = useClosedChoices(question);
   const prompts = followUpPrompts(props.prompts);
-  if (gone) return answer !== null && prompts.includes(answer) ? <SentLine text={answer} /> : null;
+  const answered = sentFor(sent, question, (text) => prompts.includes(text));
+  if (gone) return answered === null ? null : <SentLine text={answered.text} />;
   if (prompts.length === 0) return null;
-  const send = async (prompt: string) => {
-    setRunning(true);
-    try {
-      await run([{ kind: "action", type: "send", text: prompt }]);
-    } finally {
-      setRunning(false);
-    }
-  };
+  const picked = staged.get(question)?.selection ?? null;
   return (
-    <ul
-      aria-label="Suggested follow-ups"
-      inert={closed}
-      className={cn(
-        "m-0 flex min-w-0 list-none flex-col p-0 transition-opacity duration-200 ease-out motion-reduce:transition-none",
-        closed && "opacity-0",
-      )}
-    >
-      {prompts.map((prompt) => (
-        <FollowUpRow key={prompt} prompt={prompt} disabled={running} onSend={() => void send(prompt)} />
-      ))}
-    </ul>
+    <div data-genui-question={question} className="flex min-w-0 flex-col gap-2">
+      <ul
+        aria-label="Suggested follow-ups"
+        inert={closed}
+        className={cn(
+          "m-0 flex min-w-0 list-none flex-col p-0 transition-opacity duration-200 ease-out motion-reduce:transition-none",
+          closed && "opacity-0",
+        )}
+      >
+        {prompts.map((prompt) => (
+          <FollowUpRow
+            key={prompt}
+            prompt={prompt}
+            pressed={picked === prompt}
+            onPick={() => void stage(question, picked === prompt ? null : { text: prompt, selection: prompt })}
+          />
+        ))}
+      </ul>
+      {picked !== null && !closed ? <InMessageLine /> : null}
+    </div>
   );
 }
 
-function FollowUpRow({ prompt, disabled, onSend }: { prompt: string; disabled: boolean; onSend: () => void }) {
+function FollowUpRow({ prompt, pressed, onPick }: { prompt: string; pressed: boolean; onPick: () => void }) {
   const rise = useEntrance<HTMLLIElement>(RISE);
   return (
     <li ref={rise} className="min-w-0 border-t border-border/70">
       <button
         type="button"
-        disabled={disabled}
-        onClick={onSend}
-        className="group/follow flex min-h-10 w-full min-w-0 cursor-pointer touch-manipulation items-center gap-3 rounded-sm py-2 text-left text-sm leading-5 text-muted-foreground transition-colors duration-150 hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-default motion-reduce:transition-none"
+        aria-pressed={pressed}
+        onClick={onPick}
+        className={cn(
+          "group/follow flex min-h-10 w-full min-w-0 cursor-pointer touch-manipulation items-center gap-3 rounded-sm py-2 text-left text-sm leading-5 transition-colors duration-150 hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-default motion-reduce:transition-none",
+          pressed ? "font-medium text-foreground" : "text-muted-foreground",
+        )}
       >
         <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{prompt}</span>
-        <Icon
-          name="ArrowRight"
-          aria-hidden
-          className="size-3.5 shrink-0 transition-transform duration-150 group-hover/follow:translate-x-0.5 motion-reduce:transition-none"
-        />
+        {pressed ? (
+          <CheckMark className="size-3.5 shrink-0 text-[var(--color-timeline-accent,var(--primary))]" />
+        ) : (
+          <Icon
+            name="ArrowRight"
+            aria-hidden
+            className="size-3.5 shrink-0 transition-transform duration-150 group-hover/follow:translate-x-0.5 motion-reduce:transition-none"
+          />
+        )}
       </button>
     </li>
   );

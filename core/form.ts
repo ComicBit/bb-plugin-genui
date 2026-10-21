@@ -1,4 +1,5 @@
-// What a Form sends: one user message with a `label: value` line per field.
+// What a Form answers: a `Label: answer` line per field, which the answer
+// sheet (ui/answerSheet.ts) puts in the user's message as they fill it in.
 import type { ComponentName } from "./catalog";
 import type { Binding, UiNode, Value } from "./types";
 
@@ -21,6 +22,9 @@ const FIELDS: Partial<Record<ComponentName, true>> = {
   Swatches: true,
 };
 
+/** Fields the user types into: their answer waits for a pause in the typing. */
+const TYPED: Partial<Record<ComponentName, true>> = { Input: true, TextArea: true, ListEditor: true, DateInput: true };
+
 const NUMBER = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 
 function isNode(value: Value): value is UiNode {
@@ -41,10 +45,47 @@ function answer(value: Value): string {
   return JSON.stringify(value);
 }
 
-/** One `label: value` line per field, in document order, at any depth. */
-function collect(value: Value, lines: string[]): void {
+/** The values a multi-select offers: Checklist scalars, or OptionCards `{value}` (its title when it has none). */
+function optionValues(options: Value | undefined): Value[] {
+  if (!Array.isArray(options)) return [];
+  return options.flatMap((option): Value[] => {
+    if (option === null) return [];
+    if (typeof option !== "object") return [option];
+    if (Array.isArray(option) || "kind" in option) return [];
+    const record: Readonly<Record<string, Value>> = option;
+    const value = record.value;
+    if (value !== undefined && value !== null && typeof value !== "object") return [value];
+    return typeof record.title === "string" && record.title.trim() !== "" ? [record.title] : [];
+  });
+}
+
+/**
+ * A multi-select's answer: what was picked, in option order, and what was
+ * not, so the agent learns both: `CSV, JSON (not: XLSX, PDF)`; nothing
+ * picked says so with the options; everything picked says `(all)`.
+ */
+function picks(picked: readonly Value[], options: readonly Value[]): string {
+  const shown = (values: readonly Value[]) => values.map(answer).filter((item) => item !== "").join(", ");
+  if (options.length === 0) return shown(picked);
+  const chosen = [...options.filter((option) => picked.includes(option)), ...picked.filter((value) => !options.includes(value))];
+  const left = options.filter((option) => !picked.includes(option));
+  if (chosen.length === 0) return `none (options: ${shown(options)})`;
+  if (left.length === 0) return `${shown(chosen)} (all)`;
+  return `${shown(chosen)} (not: ${shown(left)})`;
+}
+
+/** A field of a Form: the state it binds and how its line reads. */
+export interface FormField {
+  readonly name: string;
+  /** The user types into it (Input, TextArea, ListEditor, DateInput). */
+  readonly typed: boolean;
+  readonly line: string;
+}
+
+/** Every field at any depth, in document order. */
+function collect(value: Value, fields: FormField[]): void {
   if (Array.isArray(value)) {
-    for (const item of value) collect(item, lines);
+    for (const item of value) collect(item, fields);
     return;
   }
   if (!isNode(value)) return;
@@ -53,17 +94,31 @@ function collect(value: Value, lines: string[]): void {
     const label = typeof value.props.label === "string" ? value.props.label.trim() : "";
     // An unrated Rating holds 0: no answer, not a zero.
     const given = value.type === "Rating" && binding.value === 0 ? null : binding.value;
+    // A list state with options to pick from is a multi-select (Checklist, OptionCards).
+    const multi = Array.isArray(given) && (value.type === "Checklist" || value.type === "OptionCards");
+    const text = multi ? picks(given, optionValues(value.props.options)) : answer(given);
     const name = label || binding.name;
     // A label that is a question or ends in a colon already reads as a prompt.
-    lines.push(`${name}${/[?:]$/.test(name) ? "" : ":"} ${answer(given) || "—"}`);
+    const line = `${name}${/[?:]$/.test(name) ? "" : ":"} ${text || "—"}`;
+    fields.push({ name: binding.name, typed: TYPED[value.type] === true, line });
     return;
   }
-  for (const prop of Object.values(value.props)) collect(prop, lines);
+  for (const prop of Object.values(value.props)) collect(prop, fields);
 }
 
-/** The message a Form's submit sends: `label: value` per field inside it (label, else state name; lists joined; Yes/No; empty "—"). */
+/** A Form's fields in document order, each with its answer line. */
+export function formFields(form: UiNode): FormField[] {
+  const fields: FormField[] = [];
+  collect(form.props.children ?? null, fields);
+  return fields;
+}
+
+/**
+ * A Form's answer: `label: value` per field inside it (label, else state
+ * name; lists joined; a multi-select's picks and the rest; Yes/No; empty "—").
+ */
 export function formMessage(form: UiNode): string {
-  const lines: string[] = [];
-  collect(form.props.children ?? null, lines);
-  return lines.join("\n");
+  return formFields(form)
+    .map((field) => field.line)
+    .join("\n");
 }

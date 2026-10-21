@@ -144,7 +144,7 @@ function staticKind(expr: Expr): Kind | undefined {
 }
 
 function signature(name: string, spec: ComponentSpec): string {
-  const params = spec.params.map(
+  const params = spec.params.filter((param) => param.legacy !== true).map(
     (param) => `${param.kind === "binding" ? "$" : ""}${param.name}${param.optional ? "?" : ""}`,
   );
   return `${name}(${params.join(", ")})`;

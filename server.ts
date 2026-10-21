@@ -18,7 +18,6 @@
 // - declares the `animations` setting, which only the page reads.
 import { cliCommand, defineCli, defineRpcContract, PluginCliError, type BbPluginApi } from "@get-bb/plugin-sdk";
 import { z } from "zod";
-import { LIMITS } from "./core/catalog";
 import {
   listGallery,
   loadGalleryAsset,
@@ -32,6 +31,7 @@ import {
   readGallerySpec,
   sketchFontDataUrl,
 } from "./data-source";
+import { checkApp, MAX_APP_CHARS } from "./core/appLint";
 import { checkSpec, renderReplyMarkdown } from "./fallback";
 import type { Value } from "./core/types";
 import {
@@ -49,7 +49,7 @@ import {
 } from "./core/project";
 import { examplesReport } from "./examples";
 import { AGENT_INSTRUCTIONS, AGENT_INSTRUCTIONS_WEB_OFF, CODE_WORK_INSTRUCTIONS, UI_REFERENCE, UI_REFERENCE_MORE } from "./instructions";
-import { foundImageSchema } from "./web/commons";
+import { foundImageSchema, wikiPhotoSchema } from "./web/commons";
 import { locatedSchema } from "./web/geocode";
 import { createWebLookups, MAX_TILE_ZOOM } from "./web/lookups";
 import { createProjectSource, projectReader } from "./project/source";
@@ -164,6 +164,10 @@ export const rpcContract = defineRpcContract({
     input: z.object({ query: z.string().min(1).max(200) }),
     output: z.discriminatedUnion("ok", [z.object({ ok: z.literal(true), image: foundImageSchema }), webFailure]),
   },
+  web_photo: {
+    input: z.object({ title: z.string().min(1).max(200) }),
+    output: z.discriminatedUnion("ok", [z.object({ ok: z.literal(true), photo: wikiPhotoSchema }), webFailure]),
+  },
   web_geocode: {
     input: z.object({ name: z.string().min(1).max(200), near: locatedSchema.nullable() }),
     output: z.discriminatedUnion("ok", [locatedSchema.extend({ ok: z.literal(true) }), webFailure]),
@@ -220,10 +224,16 @@ export const rpcContract = defineRpcContract({
 export default async function plugin(bb: BbPluginApi) {
   const web = createWebLookups(bb);
   bb.settings.define(MOTION_SETTINGS);
-  /** Image searches for markdown renderings: the photo found, or null (none, or lookups off). */
-  const findImage = async (query: string) => {
-    const found = await web.search(query);
-    return found.ok ? found.image : null;
+  /** Image searches and Wikipedia photos (Map places) for markdown renderings: the photo found, or null (none, or lookups off). */
+  const findImage = {
+    search: async (query: string) => {
+      const found = await web.search(query);
+      return found.ok ? found.image : null;
+    },
+    photo: async (title: string) => {
+      const found = await web.photo(title);
+      return found.ok ? found.photo : null;
+    },
   };
   const project = createProjectSource(bb);
   const environments = createEnvironmentsSource(bb.sdk);
@@ -231,19 +241,24 @@ export default async function plugin(bb: BbPluginApi) {
   bb.agents.registerTool({
     name: "check_ui",
     description:
-      "Checks a ```ui block before you put it in your reply: compile errors, files Load or Snippet can't read, wrong line ranges, errors its inputs cause once used (each slider end, toggle, option, emptied list), and the text version of what the user will see. Optional; use it for blocks with Load, Snippet or inputs.",
+      "Checks a ```ui block before you put it in your reply: compile errors, files Load or Snippet can't read, wrong line ranges, errors its inputs cause once used (each slider end, toggle, option, emptied list), and the text version of what the user will see. Optional; use it for blocks with Load, Snippet or inputs. With language \"app\" it checks a ```app page instead: script syntax, network use, dialogs, genui calls outside a handler.",
     instructions: UI_REFERENCE,
     parameters: z.object({
-      spec: z.string().min(1).max(LIMITS.sourceChars).describe("The block's content, without the ``` fence lines"),
+      // A ```ui spec has its own, smaller cap, which compile reports.
+      spec: z.string().min(1).max(MAX_APP_CHARS).describe("The block's content, without the ``` fence lines"),
+      language: z.enum(["ui", "app"]).optional().describe('The fence\'s language; default "app" when the content starts with "<", else "ui"'),
     }),
     presentation: { label: { pending: "Checking UI", completed: "Checked UI" }, suppress: true },
-    async execute({ spec }, ctx) {
-      const { ok, report } = await checkSpec(
-        spec,
-        (request) => loadThreadFile(bb, ctx.threadId, request.path, request),
-        findImage,
-        projectReader(project, environments, ctx.threadId),
-      );
+    async execute({ spec, language }, ctx) {
+      const { ok, report } =
+        (language ?? (spec.trimStart().startsWith("<") ? "app" : "ui")) === "app"
+          ? checkApp(spec)
+          : await checkSpec(
+              spec,
+              (request) => loadThreadFile(bb, ctx.threadId, request.path, request),
+              findImage,
+              projectReader(project, environments, ctx.threadId),
+            );
       return { content: [{ type: "text", text: report }], isError: !ok };
     },
   });
@@ -314,6 +329,7 @@ export default async function plugin(bb: BbPluginApi) {
     sketch_font: async () => ({ dataUrl: await sketchFontDataUrl() }),
     web_image: ({ url }) => web.image(url),
     web_search: ({ query }) => web.search(query),
+    web_photo: ({ title }) => web.photo(title),
     web_geocode: ({ name, near }) => web.geocode(name, near),
     web_tile: ({ z: zoom, x, y }) => web.tile(zoom, x, y),
     async project_changes({ threadId, target, paths, blockKey: block, refresh }) {

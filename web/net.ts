@@ -37,7 +37,17 @@ export type Fetched =
       readonly headers: IncomingHttpHeaders;
       readonly body: Buffer;
     }
-  | { readonly ok: false; readonly error: string };
+  /** `status`: the HTTP status, when the server answered with an error one (a 404 is a real "no such page"). */
+  | { readonly ok: false; readonly error: string; readonly status?: number };
+
+/** A response body as JSON; undefined when it isn't. */
+export function parseJson(body: Buffer): unknown {
+  try {
+    return JSON.parse(body.toString("utf8"));
+  } catch {
+    return undefined;
+  }
+}
 
 class Refused extends Error {}
 
@@ -73,7 +83,7 @@ export function refusal(url: URL): string | null {
 type Hop =
   | { readonly kind: "redirect"; readonly location: string | undefined }
   | { readonly kind: "done"; readonly status: 200 | 304; readonly headers: IncomingHttpHeaders; readonly body: Buffer }
-  | { readonly kind: "failed"; readonly error: string };
+  | { readonly kind: "failed"; readonly error: string; readonly status?: number };
 
 function failure(cause: unknown, deadline: AbortSignal): string {
   if (deadline.aborted) return "the request timed out";
@@ -137,7 +147,7 @@ function hop(url: URL, options: GetOptions, deadline: AbortSignal): Promise<Hop>
         }
         if (status !== 200 && status !== 304) {
           res.resume();
-          settle({ kind: "failed", error: `the server answered ${status}` });
+          settle({ kind: "failed", error: `the server answered ${status}`, status });
           return;
         }
         const declared = Number(res.headers["content-length"]);
@@ -189,7 +199,7 @@ export async function safeGet(input: string, options: GetOptions): Promise<Fetch
     const refused = refusal(url);
     if (refused !== null) return { ok: false, error: refused };
     const result = await hop(url, options, deadline);
-    if (result.kind === "failed") return { ok: false, error: result.error };
+    if (result.kind === "failed") return { ok: false, error: result.error, ...(result.status === undefined ? {} : { status: result.status }) };
     if (result.kind === "done") {
       return { ok: true, status: result.status, url: url.href, headers: result.headers, body: result.body };
     }

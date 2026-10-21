@@ -76,7 +76,8 @@ function heights(): HeightStore {
   return shared;
 }
 
-function remember(key: string, width: number, height: number): void {
+/** Records the height block `key` settled at, laid out at `width`; written to localStorage shortly after. */
+export function rememberHeight(key: string, width: number, height: number): void {
   const store = heights();
   if (store.get(key, width) === Math.round(height)) return;
   store.set(key, width, height);
@@ -88,6 +89,11 @@ function remember(key: string, width: number, height: number): void {
       // Storage full or unavailable: the heights hold for this page only.
     }
   }, PERSIST_MS);
+}
+
+/** The height block `key` last settled at, laid out at about `width`; at any width when `width` is null. */
+export function storedHeight(key: string, width: number | null = null): number | null {
+  return heights().get(key, width);
 }
 
 /**
@@ -111,7 +117,7 @@ export function useReservedHeight(key: string, loading: boolean) {
       const held = reserved.current;
       if (held !== null && height >= held - 1) setReserve(null);
       // Heights seen while files load or under a reservation are not the block's own.
-      if (!isLoading.current && (held === null || height >= held - 1)) remember(key, width, height);
+      if (!isLoading.current && (held === null || height >= held - 1)) rememberHeight(key, width, height);
     };
     // Laid out at another width (a narrower pane, a phone), the stored height doesn't apply.
     const width = node.getBoundingClientRect().width;
@@ -130,7 +136,7 @@ export function useReservedHeight(key: string, loading: boolean) {
     const timer = window.setTimeout(() => {
       const box = node.getBoundingClientRect();
       setReserve(null);
-      remember(key, box.width, box.height);
+      rememberHeight(key, box.width, box.height);
     }, RESERVE_MS);
     return () => clearTimeout(timer);
   }, [reserve, loading, node, key]);

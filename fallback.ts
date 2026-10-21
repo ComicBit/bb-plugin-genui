@@ -2,8 +2,8 @@
 // running the UI: the CLI, SDK consumers and other agents. ```ui blocks become
 // their static markdown rendering (ChatGPT keeps a `fallbackMarkdown` beside
 // every UI for the same reason); ```app blocks become a one-line pointer.
-// Image searches are resolved first, when a finder is given, so the markdown
-// shows the photos the UI would.
+// Image searches and Map places' Wikipedia photos are resolved first, when a
+// finder is given, so the markdown shows the photos the UI would.
 import {
   collectLoads,
   compile,
@@ -18,6 +18,7 @@ import {
   type DataRequest,
   type LoadedData,
   type SearchedImage,
+  wikiPhotos,
 } from "./core";
 import { checkShader } from "./core/glsl-check";
 import { projectRequests, toMarkdownWithProject } from "./core/markdown";
@@ -29,25 +30,30 @@ import type { UiNode, Value } from "./core/types";
 /** Fetches one file a spec reads: parsed for Load, raw text for Snippet. */
 type Loader = (request: DataRequest) => Promise<LoadedData>;
 
-/** The photo an image search finds, or null (nothing found, or web lookups off). */
-type ImageFinder = (query: string) => Promise<SearchedImage | null>;
+/** Finds the photos a rendering shows, or null (nothing found, or web lookups off). */
+interface ImageFinder {
+  /** An image search's photo (ImageSearch, Gallery `{query}`). */
+  search(query: string): Promise<SearchedImage | null>;
+  /** A Wikipedia article's lead photo (Map places' `wiki`). */
+  photo(title: string): Promise<SearchedImage | null>;
+}
 
 /** Reads the reply's thread's state from BB for Changes, Commits, PullRequest, Threads and Environments. */
 export type ProjectReader = (request: ProjectRequest) => Promise<ProjectResult>;
 
-async function findImages(roots: readonly UiNode[], find: ImageFinder | undefined): Promise<Map<string, SearchedImage | null>> {
-  if (find === undefined) return new Map();
-  return new Map(await Promise.all(imageSearches(roots).map(async (query) => [query, await find(query)] as const)));
+async function findAll(keys: readonly string[], find: (key: string) => Promise<SearchedImage | null>): Promise<Map<string, SearchedImage | null>> {
+  return new Map(await Promise.all(keys.map(async (key) => [key, await find(key)] as const)));
 }
 
-/** `roots` as markdown, with image searches and BB reads resolved. */
+/** `roots` as markdown, with image searches, Wikipedia photos and BB reads resolved. */
 async function rootsMarkdown(roots: readonly UiNode[], find: ImageFinder | undefined, project: ProjectReader | undefined): Promise<string> {
   const requests = project === undefined ? [] : projectRequests(roots);
-  const [images, answers] = await Promise.all([
-    findImages(roots, find),
+  const [images, photos, answers] = await Promise.all([
+    find === undefined ? new Map() : findAll(imageSearches(roots), (query) => find.search(query)),
+    find === undefined ? new Map() : findAll(wikiPhotos(roots), (title) => find.photo(title)),
     Promise.all(requests.map(async (request) => [projectRequestKey(request), await project!(request)] as const)),
   ]);
-  return toMarkdownWithProject(roots, images, new Map(answers));
+  return toMarkdownWithProject(roots, images, new Map(answers), photos);
 }
 
 interface Fence {

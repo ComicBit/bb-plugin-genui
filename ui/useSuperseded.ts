@@ -151,3 +151,17 @@ export function useSuperseded(threadId: string, messageId: string): boolean {
   if (verdict !== null) known.current = verdict;
   return known.current;
 }
+
+/**
+ * Message `messageId`'s index in thread `threadId`'s conversation, from the
+ * same shared outline; null until the outline lists it. Orders the answers
+ * of several replies (ui/answerSheet.ts).
+ */
+export function useReplyIndex(threadId: string, messageId: string): number | null {
+  const store = outlinesFor(useSdk());
+  const subscribe = useCallback((listener: () => void) => store.listen(threadId, listener), [store, threadId]);
+  return useSyncExternalStore(subscribe, () => {
+    const index = store.items(threadId)?.findIndex((item) => item.id === messageId) ?? -1;
+    return index === -1 ? null : index;
+  });
+}

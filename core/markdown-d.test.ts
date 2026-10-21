@@ -38,6 +38,27 @@ describe("toMarkdown: charts and meters", () => {
     );
   });
 
+  it("histogram is a range/count table per group, and says what it left out", () => {
+    expect(markdown('Chart("histogram", [0, 10, 20], {a: [1, 10, 20, 25], b: [5, null]}, unit: "ms")')).toBe(
+      "| Range (ms) | a | b |\n| --- | --- | --- |\n| 0–10 | 1 | 1 |\n| 10–20 | 2 | 0 |\n\n_1 empty or non-numeric value and 1 outside the bins left out_",
+    );
+    expect(markdown('Chart("histogram", [], [5, 5])')).toBe("| Range | Count |\n| --- | --- |\n| 4.5–5.5 | 2 |");
+    expect(markdown('Chart("histogram", ["low", "high"], [1])')).toBe("_A histogram's labels are its bin edges: ascending numbers, or [] for automatic bins_");
+  });
+
+  it("box is a five-number summary per group with its outliers; a lone series takes the first label as its name", () => {
+    expect(markdown('Chart("box", [], {api: [1, 2, 3, 4, 100], db: []}, unit: "ms")')).toBe(
+      "| (ms) | n | min | Q1 | median | Q3 | max | outliers |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| api | 5 | 1 | 2 | 3 | 4 | 100 | 100 |\n| db | 0 |  |  |  |  |  |  |",
+    );
+    expect(markdown('Chart("box", ["runs"], [3, 1, 2])')).toContain("| runs | 3 | 1 | 1.5 | 2 | 2.5 | 3 |  |");
+  });
+
+  it("reads a series written with its own tone", () => {
+    expect(markdown('Chart("bar", ["Mon", "Tue"], {ok: {values: [3, 4], tone: "good"}, failed: [1, null]})')).toBe(
+      "|  | ok | failed |\n| --- | --- | --- |\n| Mon | 3 | 1 |\n| Tue | 4 |  |",
+    );
+  });
+
   it("Gauge reads its value and range, max defaulting to 100", () => {
     expect(markdown('Gauge(72, label: "CPU")')).toBe("CPU: **72** (0–100)");
     expect(markdown("Gauge(3, min: 1, max: 5)")).toBe("**3** (1–5)");

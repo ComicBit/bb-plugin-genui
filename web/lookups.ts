@@ -1,17 +1,18 @@
 // Everything the plugin fetches from the web, behind the one `webLookups`
-// setting: photo search (Wikimedia Commons), place names to coordinates
-// (Photon), map tiles (OpenStreetMap) and the https images a UI shows. All of
-// it runs here, in the BB server, rather than in the page: the setting is a
-// real switch, model-written URLs can't make the user's browser call hosts on
-// their own network, nothing depends on the page's CSP, and one cache serves
-// every client. Results are values; nothing here throws to the caller.
+// setting: photo search (Wikimedia Commons), Wikipedia lead photos, place
+// names to coordinates (Photon), map tiles (OpenStreetMap) and the https
+// images a UI shows. All of it runs here, in the BB server, rather than in
+// the page: the setting is a real switch, model-written URLs can't make the
+// user's browser call hosts on their own network, nothing depends on the
+// page's CSP, and one cache serves every client. Results are values; nothing
+// here throws to the caller.
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import type Database from "better-sqlite3";
 import { CACHE_MIGRATIONS, WebCache, type CacheEntry } from "./cache";
-import { foundImageSchema, pickImage, searchUrl, type FoundImage } from "./commons";
+import { findWikiPhoto, foundImageSchema, pickImage, searchUrl, wikiPhotoSchema, type FoundImage, type WikiPhoto } from "./commons";
 import { geocodeUrl, locatedSchema, pickLocation, type Located } from "./geocode";
 import { declaresImage, sniffImage } from "./image";
-import { safeGet, type Fetched, type GetOptions } from "./net";
+import { parseJson, safeGet, type Fetched, type GetOptions } from "./net";
 import { setTimeout as sleep } from "node:timers/promises";
 
 export const MAX_REMOTE_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -32,7 +33,7 @@ export const WEB_SETTINGS = {
     type: "boolean",
     label: "Web lookups",
     description:
-      "Lets inline UI fetch from the web, through this BB server. ImageSearch and Gallery searches send their search words to Wikimedia Commons (commons.wikimedia.org) and load the photo from upload.wikimedia.org. Map sends the names of places given without coordinates to Photon (photon.komoot.io) and loads map tiles from OpenStreetMap (tile.openstreetmap.org). Images given as https links are fetched from the site in the link. Each request names this plugin in its User-Agent; the service sees this machine's IP address and that request, and nothing else is sent: no cookies, thread text or account details. Answers are cached in this plugin's database. Off: nothing is fetched, and those components say so.",
+      "Lets inline UI fetch from the web, through this BB server. ImageSearch and Gallery searches send their search words to Wikimedia Commons (commons.wikimedia.org) and load the photo from upload.wikimedia.org. Map sends the names of places given without coordinates to Photon (photon.komoot.io), loads map tiles from OpenStreetMap (tile.openstreetmap.org), and asks Wikipedia (en.wikipedia.org) and Commons for the lead photo of places that name a Wikipedia article. Images given as https links are fetched from the site in the link. Each request names this plugin in its User-Agent; the service sees this machine's IP address and that request, and nothing else is sent: no cookies, thread text or account details. Answers are cached in this plugin's database. Off: nothing is fetched, and those components say so.",
     default: true,
   },
 } as const;
@@ -40,6 +41,7 @@ export const WEB_SETTINGS = {
 export type WebFailure = { readonly ok: false; readonly error: string; readonly off?: boolean };
 export type WebImage = { readonly ok: true; readonly dataUrl: string } | WebFailure;
 export type WebSearch = { readonly ok: true; readonly image: FoundImage } | WebFailure;
+export type WebPhoto = { readonly ok: true; readonly photo: WikiPhoto } | WebFailure;
 export type WebPlace = ({ readonly ok: true } & Located) | WebFailure;
 
 const OFF: WebFailure = { ok: false, off: true, error: "Web lookups are off in the Generative UI plugin settings" };
@@ -65,14 +67,6 @@ function dataUrl(mime: string, body: Buffer): string {
   return `data:${mime};base64,${body.toString("base64")}`;
 }
 
-function parseJson(body: Buffer): unknown {
-  try {
-    return JSON.parse(body.toString("utf8"));
-  } catch {
-    return undefined;
-  }
-}
-
 function metaOf(entry: CacheEntry): Record<string, unknown> {
   const meta = parseJson(Buffer.from(entry.meta, "utf8"));
   return typeof meta === "object" && meta !== null && !Array.isArray(meta) ? Object.fromEntries(Object.entries(meta)) : {};
@@ -88,6 +82,8 @@ export interface WebLookups {
   image(url: string): Promise<WebImage>;
   /** The best freely licensed photo for a description. */
   search(query: string): Promise<WebSearch>;
+  /** The credited lead photo of an English Wikipedia article, when it has one we can credit. */
+  photo(title: string): Promise<WebPhoto>;
   /** Coordinates for a place name, nudged toward `near`. */
   geocode(name: string, near: Located | null): Promise<WebPlace>;
   /** One OpenStreetMap tile as a data URL. */
@@ -203,6 +199,25 @@ export function createWebLookups(bb: BbPluginApi): WebLookups {
     });
   }
 
+  async function photo(title: string): Promise<WebPhoto> {
+    if (!(await enabled())) return OFF;
+    // Titles keep their case: Wikipedia tells "Bath" from "BATH".
+    const wanted = title.trim().replace(/\s+/g, " ");
+    if (wanted === "") return { ok: false, error: "the place names no Wikipedia article" };
+    const key = `wiki:${wanted}`;
+    const notFound: WebFailure = { ok: false, error: `no photo to credit in the Wikipedia article “${wanted}”` };
+    return once(key, async (): Promise<WebPhoto> => {
+      const hit = cached(key);
+      const parsed = hit === null ? null : wikiPhotoSchema.nullable().safeParse(metaOf(hit).photo);
+      const remembered = parsed?.success ? parsed.data : null;
+      if (hit !== null && !hit.expired && parsed?.success) return remembered === null ? notFound : { ok: true, photo: remembered };
+      const found = await findWikiPhoto(wanted, (url) => api(() => safeGet(url, jsonRequest)));
+      if (!found.ok) return remembered !== null ? { ok: true, photo: remembered } : found;
+      store(() => cache.put(key, Buffer.alloc(0), JSON.stringify({ photo: found.photo }), found.photo === null ? MISS_TTL_MS : FOUND_TTL_MS));
+      return found.photo === null ? notFound : { ok: true, photo: found.photo };
+    });
+  }
+
   async function geocode(name: string, near: Located | null): Promise<WebPlace> {
     if (!(await enabled())) return OFF;
     const normalized = normalize(name);
@@ -263,5 +278,5 @@ export function createWebLookups(bb: BbPluginApi): WebLookups {
     });
   }
 
-  return { image, search, geocode, tile, isOn: () => on };
+  return { image, search, photo, geocode, tile, isOn: () => on };
 }
