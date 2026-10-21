@@ -7,11 +7,10 @@
 // the values the user moved, built only when clicked.
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
-import { experimental_SourceCode as HostSourceCode } from "@get-bb/plugin-sdk/app";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import type { Diagnostic } from "../core/types";
-import { viewerPath } from "./components/code";
+import { SourceView, viewerPath } from "./components/code";
 
 /** A file the spec reads with Load or Snippet, as the source panel lists it. */
 export interface SourceFile {
@@ -316,7 +315,7 @@ function SourceBody({
   return (
     <div id={id} role="region" aria-label={`Source of ${name}`} className="border-t border-border">
       <div className="max-h-80 overflow-auto text-xs">
-        <HostSourceCode content={source} path={viewerPath(viewerName, source)} overflow="scroll" />
+        <SourceView content={source} path={viewerPath(viewerName, source)} />
       </div>
       {files.length === 0 && diagnostics.length === 0 ? null : (
         <dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2.5 border-t border-border px-3 py-2.5 text-[11px] leading-4">

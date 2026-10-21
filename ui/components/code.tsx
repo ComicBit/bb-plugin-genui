@@ -97,13 +97,51 @@ export function viewerPath(path: string, content: string): string {
   return `${(hash >>> 0).toString(36)}/${path}`;
 }
 
+/** How many times a hidden ancestor (an inactive tab, a closed Details) took away `element`'s box after it was shown. */
+function useTimesHidden(element: RefObject<HTMLElement | null>): number {
+  const [count, setCount] = useState(0);
+  // From layout, where BB's viewer starts watching too: a hide right after mounting isn't missed.
+  useLayoutEffect(() => {
+    const box = element.current;
+    if (box === null) return;
+    let shown = false;
+    const observer = new ResizeObserver(() => {
+      const visible = box.getClientRects().length > 0;
+      if (shown && !visible) setCount((value) => value + 1);
+      shown = visible;
+    });
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, [element]);
+  return count;
+}
+
+/**
+ * BB's source viewer, made anew each time it is hidden. Hidden by
+ * display:none, the viewer BB 0.46 ships (@pierre/diffs 1.2.9's
+ * VirtualizedFile) swaps its lines for a blank placeholder and, shown again,
+ * keeps it: it still counts the lines as drawn. A viewer made while hidden
+ * draws its lines at once (the first 200 or so; further down, a frame after
+ * it is shown), so the box comes back drawn and at its height.
+ * @pierre/diffs 1.3.0 fixed it; this can go once BB ships that.
+ */
+export function SourceView({ content, path }: { content: string; path: string }) {
+  const box = useRef<HTMLDivElement>(null);
+  const hidden = useTimesHidden(box);
+  return (
+    <div ref={box}>
+      <HostSourceCode key={hidden} content={content} path={path} overflow="scroll" />
+    </div>
+  );
+}
+
 export function Code({ props }: { props: Props }) {
   const code = text(props.code);
   const language = optionalText(props.language)?.trim().toLowerCase() || null;
   const extension = language === null ? "txt" : (EXTENSIONS[language] ?? language.replace(/[^a-z0-9]/g, "")) || "txt";
   return (
     <CodeFrame caption={<span className="truncate">{language ?? "code"}</span>} actions={<CopyButton code={code} />} lines={code.split("\n").length}>
-      <HostSourceCode content={code} path={viewerPath(`snippet.${extension}`, code)} overflow="scroll" />
+      <SourceView content={code} path={viewerPath(`snippet.${extension}`, code)} />
     </CodeFrame>
   );
 }
@@ -147,7 +185,7 @@ export function Snippet({ props }: { props: Props }) {
       </div>
     );
   } else {
-    body = <HostSourceCode content={code} path={viewerPath(path, code)} overflow="scroll" />;
+    body = <SourceView content={code} path={viewerPath(path, code)} />;
   }
 
   // The viewer draws one line per newline-separated part; while the file loads, the range asked for is the best guess.
