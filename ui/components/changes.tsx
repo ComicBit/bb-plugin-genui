@@ -399,7 +399,7 @@ function FileRow({
             }}
             className={cn(ICON_BUTTON, "opacity-70 group-hover/file:opacity-100 focus-visible:opacity-100")}
           >
-            <Icon name="ExternalLink" aria-hidden className="size-3.5" />
+            <Icon name="FileText" aria-hidden className="size-3.5" />
           </button>
         )}
       </div>

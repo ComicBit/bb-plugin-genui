@@ -25,7 +25,7 @@ import {
 import { formatElapsed } from "../../core/pipeline";
 import { CardDepthContext, useUiRuntime } from "../runtime";
 import { formatNumber, TONE_DOT, TONE_TEXT, type Props } from "../values";
-import { CodeExcerpt, OpenFileButton, ReportFrame, TEXT_BUTTON, useFileText } from "./codeHealthKit";
+import { CodeExcerpt, OpenFileButton, ReportFrame, TEXT_BUTTON, useFileOpener, useFileText } from "./codeHealthKit";
 import { ErrorLine } from "./display";
 import { FOCUS_RING } from "./inputs";
 import { useImageUrl } from "./media";
@@ -248,14 +248,16 @@ function Excerpt({ text, line }: { text: string; line: number | null }) {
 
 function FileEvidence({ evidence }: { evidence: Extract<Evidence, { kind: "file" }> }) {
   const file = useFileText(evidence.path);
+  const opener = useFileOpener(evidence.path);
   if (evidence.line !== null) {
     return <CodeExcerpt path={evidence.path} file={file} mark={{ start: evidence.line, end: evidence.line }} tone="info" />;
   }
   return (
     <div className="min-w-0 overflow-hidden rounded-lg border border-border bg-background">
+      {/* CodeExcerpt's header, as for a file with a line: the open button is the file's icon. Where BB can't open it, a plain icon leads. */}
       <div className="flex h-7 items-center justify-between gap-3 border-b border-border bg-surface-recessed pl-3 pr-1 text-[11px] text-muted-foreground">
         <span className="flex min-w-0 items-center gap-1.5">
-          <Icon name="FileText" aria-hidden className="size-3 shrink-0" />
+          {opener === null ? <Icon name="FileText" aria-hidden className="size-3 shrink-0" /> : null}
           <span className="truncate font-mono text-foreground" title={evidence.path}>
             {evidence.label ?? evidence.path}
           </span>

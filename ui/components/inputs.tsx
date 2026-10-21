@@ -1,7 +1,8 @@
-import { createContext, useContext, useEffect, useId, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useRef, useState, type ReactElement, type ReactNode } from "react";
 import type { Action, UiNode, Value } from "../../core/types";
 import { Button as BaseButton } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { resolveIconName } from "../icons";
 import { CardDepthContext, NodeKeyContext, questionClosed, sentFor, useAnswers, useUiRuntime } from "../runtime";
@@ -16,6 +17,7 @@ import {
   text,
   type Props,
 } from "../values";
+import { ACTION_GLYPHS, actionIntent, sendEffect } from "./action-logic";
 import { CheckMark, ErrorLine } from "./display";
 // fields.tsx imports this module's field styles; Radio is only used at render time, so the cycle is safe.
 import { Radio } from "./fields";
@@ -346,50 +348,124 @@ function ButtonView({ props }: { props: Props }) {
   const pressed = picks && choice.pressed;
   const filled = props.variant === "primary" && !nested;
   const destructive = props.variant === "destructive";
-  // An unknown name draws nothing; links and copies get their glyph by default.
-  const icon = pressed
-    ? "Check"
-    : props.icon !== undefined
-      ? resolveIconName(text(props.icon))
-      : actions.some((action) => action.type === "openUrl")
-        ? "ExternalLink"
-        : actions.some((action) => action.type === "copy")
-          ? "Copy"
-          : null;
+  const { target } = useAnswers();
+  // The hint doesn't quote the label back, unless the button's width cuts it
+  // off: measured as the pointer arrives or focus lands, before the hint opens.
+  const labelRef = useRef<HTMLSpanElement>(null);
+  const [clipped, setClipped] = useState(false);
+  const measure = () => {
+    const span = labelRef.current;
+    if (span !== null) setClipped(span.scrollWidth > span.clientWidth);
+  };
+  // A button without an action answers with its own label.
+  const intended: readonly Action[] = props.action === undefined ? [{ kind: "action", type: "send", text: label }] : actions;
+  const { glyph, hint } = actionIntent(intended, {
+    send: sendEffect(target, picks, pressed),
+    shown: clipped ? undefined : label,
+  });
+  // The spec's icon says what the button is about, the glyph at its end what
+  // pressing it does; a picked choice shows a check instead. An unknown name
+  // draws nothing, and an action's glyph is never the spec's icon: it would
+  // show twice, or promise another action.
+  const named = props.icon === undefined ? null : resolveIconName(text(props.icon));
+  const icon = pressed ? "Check" : named === null || ACTION_GLYPHS.has(named) ? null : named;
   const others = actions.filter((action) => action.type !== "send");
   return (
-    <BaseButton
-      type="button"
-      size="sm"
-      variant={filled ? "default" : "outline"}
-      disabled={running || (!picks && others.length === 0)}
-      aria-busy={running || undefined}
-      aria-pressed={picks ? pressed : undefined}
-      onClick={async () => {
-        setRunning(true);
-        try {
-          if (!picks) await run(others);
-          else {
-            if (!pressed && others.length > 0) await run(others);
-            choice.toggle(answers.join("\n"));
+    <ActionHint hint={hint}>
+      <BaseButton
+        type="button"
+        size="sm"
+        variant={filled ? "default" : "outline"}
+        disabled={running || (!picks && others.length === 0)}
+        aria-busy={running || undefined}
+        aria-pressed={picks ? pressed : undefined}
+        onPointerEnter={measure}
+        onFocus={measure}
+        onClick={async () => {
+          setRunning(true);
+          try {
+            if (!picks) await run(others);
+            else {
+              if (!pressed && others.length > 0) await run(others);
+              choice.toggle(answers.join("\n"));
+            }
+          } finally {
+            setRunning(false);
           }
-        } finally {
-          setRunning(false);
-        }
-      }}
-      className={cn(
-        "w-fit max-w-full gap-1.5 text-[13px]",
-        !filled && "bg-background text-foreground",
-        pressed && "ring-2 ring-[var(--color-timeline-accent,var(--primary))] ring-offset-1 ring-offset-background",
-        pressed && !filled && "border-transparent bg-surface-recessed",
-        destructive &&
-          "border-destructive/40 text-destructive hover:bg-destructive/8 hover:text-destructive focus-visible:ring-destructive/60",
-      )}
-    >
-      {icon === null ? null : <Icon name={icon} aria-hidden className="size-3.5 shrink-0" />}
-      <span className="truncate">{label}</span>
-    </BaseButton>
+        }}
+        className={cn(
+          "w-fit max-w-full gap-1.5 text-[13px]",
+          !filled && "bg-background text-foreground",
+          pressed && "ring-2 ring-[var(--color-timeline-accent,var(--primary))] ring-offset-1 ring-offset-background",
+          pressed && !filled && "border-transparent bg-surface-recessed",
+          destructive &&
+            "border-destructive/40 text-destructive hover:bg-destructive/8 hover:text-destructive focus-visible:ring-destructive/60",
+        )}
+      >
+        {icon === null ? null : <Icon name={icon} aria-hidden className="size-3.5 shrink-0" />}
+        <span ref={labelRef} className="truncate">
+          {label}
+        </span>
+        {glyph === null ? null : <ActionGlyph name={glyph} />}
+      </BaseButton>
+    </ActionHint>
   );
+}
+
+/** The glyph at the end of a control saying what pressing it does (action-logic.ts), quieter than its label. */
+export function ActionGlyph({ name }: { name: string }) {
+  return <Icon name={name} aria-hidden className="size-3.5 shrink-0 opacity-60" />;
+}
+
+/** How long the pointer rests on a control before its hint shows; a neighbour's then shows at once. */
+const HINT_DELAY_MS = 300;
+
+/** True under a HintProvider. */
+const HintScope = createContext(false);
+
+/** One tooltip provider for a block's hints (LiveUi), so moving to a neighbouring control doesn't wait again. */
+export function HintProvider({ children }: { children: ReactNode }) {
+  return (
+    <TooltipProvider delayDuration={HINT_DELAY_MS}>
+      <HintScope value={true}>{children}</HintScope>
+    </TooltipProvider>
+  );
+}
+
+/**
+ * BB's tooltip with what pressing `children` does (actionIntent's hint), on
+ * hover or keyboard focus. Without a hint it never opens but keeps the same
+ * tree, so an action that changes with state doesn't remount a focused
+ * control. Outside a HintProvider it brings its own.
+ */
+export function ActionHint({
+  hint,
+  align,
+  children,
+}: {
+  hint: string | null;
+  /** "end" over a full-width row, beside its glyph. */
+  align?: "center" | "end";
+  children: ReactElement;
+}) {
+  const scoped = useContext(HintScope);
+  const [open, setOpen] = useState(false);
+  const tooltip = (
+    // The hint holds no controls: it closes as the pointer leaves, and clicks pass through to what it covers.
+    <Tooltip open={open && hint !== null} onOpenChange={setOpen} disableHoverableContent>
+      <TooltipTrigger asChild>{children}</TooltipTrigger>
+      {hint === null ? null : (
+        <TooltipContent
+          align={align}
+          // The registry's fade and zoom, in and out, hold still when the system asks for reduced motion.
+          className="pointer-events-none whitespace-pre-line motion-reduce:animate-none motion-reduce:data-[state=closed]:animate-none"
+        >
+          {hint}
+        </TooltipContent>
+      )}
+    </Tooltip>
+  );
+  return scoped ? tooltip : <TooltipProvider delayDuration={HINT_DELAY_MS}>{tooltip}</TooltipProvider>;
 }
 
 /** A quiet confirmation of what this UI sent; `text` null reads just "Sent". */

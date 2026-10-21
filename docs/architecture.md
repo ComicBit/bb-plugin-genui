@@ -209,6 +209,38 @@ The internals behind [the README](../README.md): how agents learn the language, 
    pick would put in the message; only a thread with no composer on screen
    (or one without `replace`) sends a pick at once, and its Forms keep a
    Send button.
+   A control whose action leaves the block says so
+   (`ui/components/action-logic.ts`): a glyph at its end (`Sent` for an
+   answer, `ExternalLink` for a link, `Copy` for a copy) and, on hover or
+   keyboard focus, BB's tooltip (`components/ui/tooltip.tsx`, from the `@bb`
+   registry) saying what pressing does now (`SendEffect`): an answer reads
+   "Add to your message", "Take it out of your message" once picked, and
+   "Send as your reply" where a pick is sent at once; a link shows what it
+   opens and a copy what it copies. A text the control already shows isn't
+   quoted again, unless the button's width cuts its label off (measured as
+   the pointer arrives or focus lands); otherwise it is quoted, as a
+   Decision's weights or a Form's answers. Links show the address the
+   browser opens, without a user name or password, and one LiveUi won't open
+   (not http or https) says so (`openableLink`, shared with LiveUi's
+   OpenUrl). A quoted text's later lines are indented, so none reads as
+   another action's line. A spec's `icon:` that is an action's glyph is
+   dropped on a control that acts (a Button, a List row): the glyph at its
+   end already shows it, or it would promise another action; a picked choice
+   shows a check in front instead. Hints hold still under reduced motion.
+   This covers Buttons (Decision's, Dependencies' and Pipeline's too), List
+   rows, FollowUps, Form's Send, Plan's Approve, the Findings fix buttons,
+   Entity's link, Waterfall's Open and Board cards. `Set` changes only the
+   block, so it gets neither. A block shares one tooltip provider
+   (`HintProvider` in LiveUi), so a neighbour's hint shows without waiting
+   again. Hints take no pointer events and close as the pointer leaves. A
+   control keeps the same tree with or without a hint, so an action that
+   changes with state doesn't remount a focused button. Touch screens show
+   the glyph only. Buttons that open a file in BB draw `FileText`, the File
+   component's icon, so `ExternalLink` always means a web page. A row that
+   names a file draws that icon once: a code frame's header ends with the
+   open button (or leads with a plain icon where BB can't open the file), and
+   a file listed as an item (a Findings group, a review artifact, Acceptance
+   evidence) is itself the control that opens it.
 6. Choices close once sent. Consecutive Buttons render side by side (a Row
    of Buttons too). When the user sends the draft (`composer.onSubmitted`)
    every staged answer becomes its block's sent answer (several per block,
@@ -338,8 +370,8 @@ the instructions list it.
 - Inputs: Slider, Stepper, Toggle, Choice (a vertical list when its options
   are long), Radio, Select, Checklist, ListEditor, Input, TextArea, DateInput,
   Rating, OptionCards, Swatches, EditableTable, FollowUps, Button (primary,
-  secondary or red destructive; an optional BB icon, resolved against
-  `ui/icons.ts`), Form
+  secondary or red destructive; an optional BB icon in front, resolved
+  against `ui/icons.ts`, and its action's glyph at its end), Form
 - Widgets: Timer, Quiz, Flashcards, Walkthrough
 - Project: Changes, Commits, PullRequest and Threads read the reply's
   thread's own state from BB (its checkout's diff, its branch's commits and

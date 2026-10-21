@@ -40,9 +40,10 @@ import {
 import { CardDepthContext, useUiRuntime } from "../runtime";
 import { usePersistedState, propsKey } from "../usePersistedState";
 import { formatNumber, TONE_DOT, TONE_PILL, TONE_TEXT, type Props, type Tone } from "../values";
+import { actionIntent } from "./action-logic";
 import { CHAR_WIDTH, useWidth } from "./chartKit";
 import { ErrorLine } from "./display";
-import { FOCUS_RING } from "./inputs";
+import { ActionHint, FOCUS_RING } from "./inputs";
 import { CHART_DRAW_MS, EASE_OUT_EXPO, FADE, RISE, useEntrance, type Entrance } from "./motion";
 import { QuietLine, ShowAll } from "./projectKit";
 
@@ -314,6 +315,7 @@ function Card({ card, today, open, onToggle }: { card: BoardCard; today: number;
       <span className="flex min-w-0 items-center gap-1.5">
         <PriorityMark priority={card.priority} />
         {card.key === null ? null : <span className="truncate font-mono text-[11px] leading-4 text-muted-foreground">{card.key}</span>}
+        {card.url === null ? null : <Icon name="ExternalLink" aria-hidden className="size-3 shrink-0 text-muted-foreground" />}
         <span className="flex-1" />
         {card.agents > 0 ? <LiveDot agents={card.agents} /> : null}
         <Owners names={card.owners} />
@@ -343,9 +345,11 @@ function Card({ card, today, open, onToggle }: { card: BoardCard; today: number;
   if (card.url !== null) {
     const url = card.url;
     content = (
-      <button type="button" className={interactive} title={`Open ${url}`} onClick={() => openUrl(url)}>
-        {body}
-      </button>
+      <ActionHint hint={actionIntent([{ kind: "action", type: "openUrl", url }]).hint}>
+        <button type="button" className={interactive} onClick={() => openUrl(url)}>
+          {body}
+        </button>
+      </ActionHint>
     );
   } else if (card.detail !== null) {
     content = (

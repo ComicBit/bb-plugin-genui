@@ -5,7 +5,8 @@ import { deferAnswer, flushAnswers } from "../answerSheet";
 import { RenderNodes } from "../render";
 import { NodeKeyContext, questionClosed, sentFor, useAnswers, UiRuntimeContext, useUiRuntime, type UiRuntime } from "../runtime";
 import { nodes, type Props } from "../values";
-import { InMessageLine, SentLine } from "./inputs";
+import { actionIntent } from "./action-logic";
+import { ActionGlyph, ActionHint, InMessageLine, SentLine } from "./inputs";
 
 /**
  * Disabled fields keep their values legible: no UA graying (Safari dims
@@ -85,7 +86,6 @@ export function Form({ props }: { props: Props }) {
       release();
     };
   }, [closed, target, message, edit, question, stage]);
-
   return (
     <fieldset
       data-genui-question={question}
@@ -99,20 +99,24 @@ export function Form({ props }: { props: Props }) {
       {answered ? (
         <SentLine text={null} />
       ) : closed ? null : target === "direct" ? (
-        <BaseButton
-          type="button"
-          size="sm"
-          disabled={sending || message === ""}
-          aria-busy={sending || undefined}
-          onClick={async () => {
-            setSending(true);
-            await stage(question, { text: message, selection: true });
-            setSending(false);
-          }}
-          className="w-fit max-w-full text-[13px]"
-        >
-          Send
-        </BaseButton>
+        // The hint quotes the answers the button posts: one line per field.
+        <ActionHint hint={actionIntent([{ kind: "action", type: "send", text: message }], { send: "send" }).hint}>
+          <BaseButton
+            type="button"
+            size="sm"
+            disabled={sending || message === ""}
+            aria-busy={sending || undefined}
+            onClick={async () => {
+              setSending(true);
+              await stage(question, { text: message, selection: true });
+              setSending(false);
+            }}
+            className="w-fit max-w-full gap-1.5 text-[13px]"
+          >
+            Send
+            <ActionGlyph name="Sent" />
+          </BaseButton>
+        </ActionHint>
       ) : entry !== undefined ? (
         <InMessageLine />
       ) : null}

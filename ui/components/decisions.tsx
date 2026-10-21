@@ -43,9 +43,10 @@ import type { Value } from "../../core/types";
 import { NodeKeyContext, questionClosed, sentFor, useAnswers, useUiRuntime } from "../runtime";
 import { propsKey, usePersistedState } from "../usePersistedState";
 import { formatNumber, TONE_PILL, type Props, type Tone } from "../values";
+import { actionIntent, sendEffect } from "./action-logic";
 import { niceScale } from "./chartMath";
 import { CheckMark, ErrorLine } from "./display";
-import { Button, ButtonGroup, CAPTION, FIELD, FOCUS_RING, InMessageLine, SentLine } from "./inputs";
+import { ActionGlyph, ActionHint, Button, ButtonGroup, CAPTION, FIELD, FOCUS_RING, InMessageLine, SentLine } from "./inputs";
 import { RISE, useEntrance } from "./motion";
 import { ICON_BUTTON, Panel, QuietLine, ShowAll } from "./projectKit";
 
@@ -303,19 +304,23 @@ export function Plan({ props }: { props: Props }) {
         </div>
       ) : closed ? null : (
         <div data-genui-question={question} className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-border px-3 py-3">
-          <BaseButton
-            type="button"
-            size="sm"
-            variant={approved ? "outline" : "default"}
-            disabled={sending || message === ""}
-            aria-busy={sending || undefined}
-            aria-pressed={target === "direct" ? undefined : approved}
-            onClick={() => void approve()}
-            className={cn("w-fit max-w-full gap-1.5 text-[13px]", approved && "border-transparent bg-surface-recessed text-foreground ring-2 ring-[var(--color-timeline-accent,var(--primary))] ring-offset-1 ring-offset-background")}
-          >
-            {approved ? <Icon name="Check" aria-hidden className="size-3.5 shrink-0" /> : null}
-            <span className="truncate">Approve</span>
-          </BaseButton>
+          {/* The caption beside it already quotes the approval. */}
+          <ActionHint hint={actionIntent([{ kind: "action", type: "send", text: message }], { send: sendEffect(target, true, approved), shown: message }).hint}>
+            <BaseButton
+              type="button"
+              size="sm"
+              variant={approved ? "outline" : "default"}
+              disabled={sending || message === ""}
+              aria-busy={sending || undefined}
+              aria-pressed={target === "direct" ? undefined : approved}
+              onClick={() => void approve()}
+              className={cn("w-fit max-w-full gap-1.5 text-[13px]", approved && "border-transparent bg-surface-recessed text-foreground ring-2 ring-[var(--color-timeline-accent,var(--primary))] ring-offset-1 ring-offset-background")}
+            >
+              {approved ? <Icon name="Check" aria-hidden className="size-3.5 shrink-0" /> : null}
+              <span className="truncate">Approve</span>
+              <ActionGlyph name="Sent" />
+            </BaseButton>
+          </ActionHint>
           {approved ? (
             <InMessageLine />
           ) : (

@@ -10,9 +10,10 @@ import { cn } from "@/lib/utils";
 import { formatAmount, formatBytes, formatMs, niceTicks } from "../../core/perf-units";
 import { ancestry, PHASE_LABEL, PHASES, readWaterfall, type PhaseName, type Span, type Waterfall as WaterfallData } from "../../core/waterfall";
 import { ACCENT, optionalText, TONE_TEXT, type Props } from "../values";
+import { actionIntent } from "./action-logic";
 import { TONE_STROKE } from "./chartKit";
 import { ErrorLine } from "./display";
-import { FOCUS_RING } from "./inputs";
+import { ActionHint, FOCUS_RING } from "./inputs";
 import { CHART_DRAW_MS, SMOOTH_HEIGHT_CLASS, useEntrance, useSmoothHeight, type Entrance } from "./motion";
 import { Frame, gridLines, Heading, Quiet, TEXT_BUTTON, useOpenUrl } from "./perfKit";
 
@@ -387,9 +388,12 @@ function Detail({ data, span }: { data: WaterfallData; span: Span }) {
           <span className="shrink-0 font-mono text-[11px] font-medium text-muted-foreground">{request.method}</span>
           <span className="min-w-0 flex-1 break-all font-mono text-[11px] text-foreground">{request.url}</span>
           {/^https?:\/\//i.test(request.url) ? (
-            <button type="button" onClick={() => openUrl(request.url)} className={TEXT_BUTTON}>
-              Open
-            </button>
+            <ActionHint hint={actionIntent([{ kind: "action", type: "openUrl", url: request.url }]).hint}>
+              <button type="button" onClick={() => openUrl(request.url)} className={cn(TEXT_BUTTON, "inline-flex items-center gap-1")}>
+                Open
+                <Icon name="ExternalLink" aria-hidden className="size-3 shrink-0" />
+              </button>
+            </ActionHint>
           ) : null}
         </div>
       )}

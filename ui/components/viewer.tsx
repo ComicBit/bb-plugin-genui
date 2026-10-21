@@ -618,7 +618,7 @@ export function ImageViewer({
             }}
             className={cn(VIEWER_BUTTON, TONES.photo.button)}
           >
-            <Icon name="ExternalLink" className="size-5" />
+            <Icon name="FileText" className="size-5" />
           </button>
         )
       }

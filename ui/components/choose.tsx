@@ -18,9 +18,10 @@ import { resolveIconName } from "../icons";
 import { RenderNode } from "../render";
 import { CardDepthContext, NodeKeyContext, sentFor, useAnswers, useUiRuntime } from "../runtime";
 import { isBinding, list, nodes, optionalText, type Props } from "../values";
+import { actionIntent, sendEffect, type SendEffect } from "./action-logic";
 import { cardOptions, followUpPrompts, sameColor, swatchColors, togglePick, type CardOption } from "./choose-logic";
 import { CheckMark, ErrorLine } from "./display";
-import { CAPTION, InMessageLine, SentLine, useClosedChoices } from "./inputs";
+import { ActionHint, CAPTION, InMessageLine, SentLine, useClosedChoices } from "./inputs";
 import { useImageUrl, type ImageState } from "./media";
 import { reducedMotion, RISE, useEntrance } from "./motion";
 import { ExpandButton, useGroupPicture, ViewerGroup } from "./viewer";
@@ -388,7 +389,7 @@ function SwatchChip({
  * (leaving a "sent" line) or once the thread moved on.
  */
 export function FollowUps({ props }: { props: Props }) {
-  const { staged, sent, stage } = useAnswers();
+  const { staged, sent, target, stage } = useAnswers();
   const question = useContext(NodeKeyContext);
   const { closed, gone } = useClosedChoices(question);
   const prompts = followUpPrompts(props.prompts);
@@ -411,6 +412,7 @@ export function FollowUps({ props }: { props: Props }) {
             key={prompt}
             prompt={prompt}
             pressed={picked === prompt}
+            effect={sendEffect(target, !closed, picked === prompt)}
             onPick={() => void stage(question, picked === prompt ? null : { text: prompt, selection: prompt })}
           />
         ))}
@@ -420,30 +422,32 @@ export function FollowUps({ props }: { props: Props }) {
   );
 }
 
-function FollowUpRow({ prompt, pressed, onPick }: { prompt: string; pressed: boolean; onPick: () => void }) {
+function FollowUpRow({ prompt, pressed, effect, onPick }: { prompt: string; pressed: boolean; effect: SendEffect; onPick: () => void }) {
   const rise = useEntrance<HTMLLIElement>(RISE);
   return (
     <li ref={rise} className="min-w-0 border-t border-border/70">
-      <button
-        type="button"
-        aria-pressed={pressed}
-        onClick={onPick}
-        className={cn(
-          "group/follow flex min-h-10 w-full min-w-0 cursor-pointer touch-manipulation items-center gap-3 rounded-sm py-2 text-left text-sm leading-5 transition-colors duration-150 hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-default motion-reduce:transition-none",
-          pressed ? "font-medium text-foreground" : "text-muted-foreground",
-        )}
-      >
-        <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{prompt}</span>
-        {pressed ? (
-          <CheckMark className="size-3.5 shrink-0 text-[var(--color-timeline-accent,var(--primary))]" />
-        ) : (
-          <Icon
-            name="ArrowRight"
-            aria-hidden
-            className="size-3.5 shrink-0 transition-transform duration-150 group-hover/follow:translate-x-0.5 motion-reduce:transition-none"
-          />
-        )}
-      </button>
+      <ActionHint hint={actionIntent([{ kind: "action", type: "send", text: prompt }], { send: effect, shown: prompt }).hint} align="end">
+        <button
+          type="button"
+          aria-pressed={pressed}
+          onClick={onPick}
+          className={cn(
+            "group/follow flex min-h-10 w-full min-w-0 cursor-pointer touch-manipulation items-center gap-3 rounded-sm py-2 text-left text-sm leading-5 transition-colors duration-150 hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-default motion-reduce:transition-none",
+            pressed ? "font-medium text-foreground" : "text-muted-foreground",
+          )}
+        >
+          <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{prompt}</span>
+          {pressed ? (
+            <CheckMark className="size-3.5 shrink-0 text-[var(--color-timeline-accent,var(--primary))]" />
+          ) : (
+            <Icon
+              name="Sent"
+              aria-hidden
+              className="size-3.5 shrink-0 transition-transform duration-150 group-hover/follow:translate-x-0.5 motion-reduce:transition-none"
+            />
+          )}
+        </button>
+      </ActionHint>
     </li>
   );
 }

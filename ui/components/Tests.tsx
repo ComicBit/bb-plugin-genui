@@ -323,7 +323,7 @@ function OpenFrame({ path, line }: { path: string; line: number }) {
       }}
       className={cn(ICON_BUTTON, "-my-[3px] size-5")}
     >
-      <Icon name="ExternalLink" className="size-3" />
+      <Icon name="FileText" className="size-3" />
     </button>
   );
 }

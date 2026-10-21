@@ -35,7 +35,7 @@ import {
 import { CardDepthContext, useUiRuntime } from "../runtime";
 import { propsKey, usePersistedState } from "../usePersistedState";
 import { formatNumber, TONE_TEXT, type Props } from "../values";
-import { CodeExcerpt, Disclosure, OpenFileButton, ReportPathsContext, Segmented, TEXT_BUTTON, useFileText, useShownPath, useWorkspaceRoot, type MarkTone } from "./codeHealthKit";
+import { CodeExcerpt, Disclosure, ReportPathsContext, Segmented, TEXT_BUTTON, useFileOpener, useFileText, useShownPath, useWorkspaceRoot, type MarkTone } from "./codeHealthKit";
 import { ErrorLine } from "./display";
 import { CAPTION, FOCUS_RING } from "./inputs";
 import { useImageUrl } from "./media";
@@ -327,6 +327,7 @@ function Legend({ report }: { report: AcceptanceReport }) {
 
 function EvidenceFile({ item, tone }: { item: Extract<Evidence, { kind: "file" }>; tone: MarkTone }) {
   const shownPath = useShownPath();
+  const opener = useFileOpener(item.path);
   const file = useFileText(item.line === null ? null : item.path);
   if (item.line !== null) {
     return (
@@ -336,17 +337,40 @@ function EvidenceFile({ item, tone }: { item: Extract<Evidence, { kind: "file" }
       </div>
     );
   }
-  return (
-    <div className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-background py-1 pl-2.5 pr-1">
+  // Like a link's box beside it: the whole box opens the file, its path in the link colour.
+  const content = (
+    <>
       <Icon name="FileText" aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
       <span className="flex min-w-0 flex-1 flex-col">
         {item.label === null ? null : <span className="truncate text-xs leading-4 text-foreground">{item.label}</span>}
-        <span className="truncate font-mono text-[11px] leading-5 text-muted-foreground" title={item.path}>
+        <span
+          className={cn(
+            "truncate font-mono text-[11px] leading-5",
+            opener === null ? "text-muted-foreground" : "text-primary group-hover/file:underline",
+          )}
+        >
           {shownPath(item.path)}
         </span>
       </span>
-      <OpenFileButton path={item.path} line={null} />
-    </div>
+    </>
+  );
+  const box = "flex w-full min-w-0 items-center gap-2 rounded-md border border-border bg-background px-2.5 py-1 text-left";
+  if (opener === null) {
+    return (
+      <div title={item.path} className={box}>
+        {content}
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      title={`Open ${opener.target}`}
+      onClick={() => void opener.open(null)}
+      className={cn("group/file cursor-pointer hover:bg-state-hover", box, FOCUS_RING)}
+    >
+      {content}
+    </button>
   );
 }
 

@@ -10,6 +10,7 @@ import { resolveIconName } from "../icons";
 import { RenderNode } from "../render";
 import { NodeKeyContext, questionClosed, sentFor, useAnswers, useUiRuntime } from "../runtime";
 import { ACCENT, isNode, list, TONE_DOT, TONE_PILL, TONE_TEXT, type Props } from "../values";
+import { ACTION_GLYPHS, actionIntent, sendEffect } from "./action-logic";
 import { Code } from "./code";
 import { CheckMark, ErrorLine } from "./display";
 import {
@@ -36,7 +37,7 @@ import {
   type Month,
   type WalkthroughStep,
 } from "./explain-logic";
-import { CAPTION, FOCUS_RING, InMessageLine } from "./inputs";
+import { ActionHint, CAPTION, FOCUS_RING, InMessageLine } from "./inputs";
 import { FADE, RISE, SMOOTH_HEIGHT_CLASS, useEntrance, useSmoothHeight } from "./motion";
 
 /** Outline buttons sit on the page color, as inputs.tsx's quiet buttons do. */
@@ -252,6 +253,15 @@ export function Walkthrough({ props }: { props: Props }) {
 
 type Leading = "icon" | "dot" | null;
 
+/**
+ * A row's own icon, as on a Button: on a row that acts, never an action's
+ * glyph, which its end already draws or which would promise another action.
+ */
+function rowIcon(row: ListRow): string | null {
+  const named = row.icon === null ? null : resolveIconName(row.icon);
+  return named !== null && row.actions.length > 0 && ACTION_GLYPHS.has(named) ? null : named;
+}
+
 function ListValue({ value }: { value: ListRow["value"] }): ReactNode {
   if (value === null) return null;
   if (isNode(value)) {
@@ -280,7 +290,7 @@ function ListItem({ row, leading, choice }: { row: ListRow; leading: Leading; ch
   const { run } = useUiRuntime();
   const rise = useEntrance<HTMLLIElement>(RISE);
   const [running, setRunning] = useState(false);
-  const icon = row.icon === null ? null : resolveIconName(row.icon);
+  const icon = rowIcon(row);
   const toneName = row.tone ?? "neutral";
   const sends = sentTexts(row.actions);
   const others = row.actions.filter((action) => action.type !== "send");
@@ -289,7 +299,8 @@ function ListItem({ row, leading, choice }: { row: ListRow; leading: Leading; ch
   const closed = replies && choice.closed;
   const pressed = replies && choice.pressed;
   const interactive = (replies || others.length > 0) && !closed;
-  const external = row.actions.some((action) => action.type === "openUrl");
+  const { target } = useAnswers();
+  const { glyph, hint } = actionIntent(row.actions, { send: sendEffect(target, replies && !closed, pressed), shown: row.title });
 
   const content = (
     <>
@@ -323,7 +334,8 @@ function ListItem({ row, leading, choice }: { row: ListRow; leading: Leading; ch
         </>
       ) : interactive ? (
         <HostIcon
-          name={external ? "ExternalLink" : "ChevronRight"}
+          // What a tap does: send, open or copy; a row that only changes this UI keeps the chevron.
+          name={glyph ?? "ChevronRight"}
           aria-hidden
           className="size-3.5 shrink-0 text-muted-foreground transition-colors duration-150 group-hover/row:text-foreground"
         />
@@ -334,30 +346,32 @@ function ListItem({ row, leading, choice }: { row: ListRow; leading: Leading; ch
   return (
     <li ref={rise} className="min-w-0 border-b border-border/60 last:border-b-0">
       {interactive ? (
-        <button
-          type="button"
-          disabled={running}
-          aria-busy={running || undefined}
-          aria-pressed={replies ? pressed : undefined}
-          onClick={async () => {
-            setRunning(true);
-            try {
-              // A reply row stages its answer; what else it does (a link, a Set) runs when it is picked.
-              if (!pressed && others.length > 0) await run(others);
-              if (replies) choice.pick(sends.join("\n"));
-            } finally {
-              setRunning(false);
-            }
-          }}
-          className={cn(
-            // The hover wash bleeds past the text column with shadows, which take no layout space.
-            "group/row flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-md py-2.5 text-left transition-[background-color,box-shadow] duration-150 hover:bg-state-hover hover:shadow-[-0.5rem_0_0_var(--state-hover),0.5rem_0_0_var(--state-hover)] disabled:cursor-default disabled:opacity-60",
-            pressed && "bg-state-hover shadow-[-0.5rem_0_0_var(--state-hover),0.5rem_0_0_var(--state-hover)]",
-            FOCUS_RING,
-          )}
-        >
-          {content}
-        </button>
+        <ActionHint hint={hint} align="end">
+          <button
+            type="button"
+            disabled={running}
+            aria-busy={running || undefined}
+            aria-pressed={replies ? pressed : undefined}
+            onClick={async () => {
+              setRunning(true);
+              try {
+                // A reply row stages its answer; what else it does (a link, a Set) runs when it is picked.
+                if (!pressed && others.length > 0) await run(others);
+                if (replies) choice.pick(sends.join("\n"));
+              } finally {
+                setRunning(false);
+              }
+            }}
+            className={cn(
+              // The hover wash bleeds past the text column with shadows, which take no layout space.
+              "group/row flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-md py-2.5 text-left transition-[background-color,box-shadow] duration-150 hover:bg-state-hover hover:shadow-[-0.5rem_0_0_var(--state-hover),0.5rem_0_0_var(--state-hover)] disabled:cursor-default disabled:opacity-60",
+              pressed && "bg-state-hover shadow-[-0.5rem_0_0_var(--state-hover),0.5rem_0_0_var(--state-hover)]",
+              FOCUS_RING,
+            )}
+          >
+            {content}
+          </button>
+        </ActionHint>
       ) : (
         <div className="flex min-w-0 items-center gap-3 py-2.5">{content}</div>
       )}
@@ -375,7 +389,7 @@ export function List({ props }: { props: Props }) {
     return list(props.items).length === 0 ? null : <ErrorLine message="List items need a title" />;
   }
   // One leading column for every row, so titles align.
-  const leading: Leading = rows.some((row) => row.icon !== null && resolveIconName(row.icon) !== null)
+  const leading: Leading = rows.some((row) => rowIcon(row) !== null)
     ? "icon"
     : rows.some((row) => row.tone !== null)
       ? "dot"

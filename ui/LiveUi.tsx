@@ -20,6 +20,8 @@ import {
 import { RenderNodes } from "./render";
 import { useReservedHeight } from "./reservedHeight";
 import { AnswersContext, UiRuntimeContext, type Answers, type UiRuntime } from "./runtime";
+import { openableLink } from "./components/action-logic";
+import { HintProvider } from "./components/inputs";
 import { EntranceContext, newStreamCadence, trackStream, useMotionScope } from "./components/motion";
 import { foundImages, foundWikiPhotos } from "./webLookups";
 
@@ -147,15 +149,9 @@ export function LiveUi({
           // An answer: the Button or List row holding it stages it.
           return;
         case "openUrl": {
-          let url: URL;
-          try {
-            url = new URL(action.url);
-          } catch {
-            throw new Error(`Invalid link: ${action.url}`);
-          }
-          if (url.protocol !== "http:" && url.protocol !== "https:") {
-            throw new Error("Only http and https links can be opened");
-          }
+          // The same check as the hint's, so the hint never names a link this refuses.
+          const url = openableLink(action.url);
+          if (url === null) throw new Error(`Only http and https links can be opened: ${action.url}`);
           if (!navigate.openUrl(url.href)) throw new Error(`Couldn't open ${url.href}`);
           return;
         }
@@ -256,15 +252,17 @@ export function LiveUi({
     <UiRuntimeContext value={runtime}>
       <AnswersContext value={answers}>
         <EntranceContext value={entrance}>
-          <Frame source={source} diagnostics={[...compileDiagnostics, ...diagnostics]} files={files} gallery={gallery} markdown={markdown}>
-            {/* Holds the height this block last settled at while what it reads arrives (reservedHeight.ts). */}
-            <div ref={blockRoot} style={minHeight === undefined ? undefined : { minHeight }}>
-              <div ref={content} className="flex flex-col gap-3">
-                {tree}
+          <HintProvider>
+            <Frame source={source} diagnostics={[...compileDiagnostics, ...diagnostics]} files={files} gallery={gallery} markdown={markdown}>
+              {/* Holds the height this block last settled at while what it reads arrives (reservedHeight.ts). */}
+              <div ref={blockRoot} style={minHeight === undefined ? undefined : { minHeight }}>
+                <div ref={content} className="flex flex-col gap-3">
+                  {tree}
+                </div>
               </div>
-            </div>
-            {preview === null ? null : <AnswersPreview text={preview} />}
-          </Frame>
+              {preview === null ? null : <AnswersPreview text={preview} />}
+            </Frame>
+          </HintProvider>
         </EntranceContext>
       </AnswersContext>
     </UiRuntimeContext>
