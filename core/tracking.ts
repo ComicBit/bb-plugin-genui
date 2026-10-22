@@ -1,6 +1,6 @@
 // Tracking data for Board, Roadmap and Status: reads what models write and
-// what `bb tasks list --json`, `gh issue list --json` and `gh pr list --json`
-// print into one card/item shape, and the calendar maths they share. Dates are
+// what `bb tasks list --json`, `gh issue list --json`, `gh pr list --json` and
+// REST API pull requests (`gh api repos/{owner}/{repo}/pulls`) print into one card/item shape, and the calendar maths they share. Dates are
 // whole days (days since 1970-01-01, UTC), so no timezone ever moves a due
 // date; "today" is always passed in, never read from the clock here.
 import { isPlainObject } from "./evaluate";
@@ -371,8 +371,10 @@ function githubCard(value: Value, pulls: boolean): RawCard | null {
   if (item === null) return null;
   const title = str(item.title);
   if (title === null) return null;
-  const state = str(item.state)?.toLowerCase() ?? null;
-  const status = pulls && state === "open" && item.isDraft === true ? "draft" : boardStatus(state);
+  // The REST API keeps a merged pull request "closed" and says so in `merged_at`.
+  const state = pulls && str(item.merged_at) !== null ? "merged" : (str(item.state)?.toLowerCase() ?? null);
+  const draft = item.isDraft === true || item.draft === true;
+  const status = pulls && state === "open" && draft ? "draft" : boardStatus(state);
   const assignees = people(item.assignees);
   return {
     ...EMPTY_CARD,
@@ -383,9 +385,9 @@ function githubCard(value: Value, pulls: boolean): RawCard | null {
     detail: str(item.body),
     labels: labels(item.labels),
     // A pull request without assignees is its author's.
-    owners: assignees.length === 0 && pulls ? people(item.author) : assignees,
-    url: webUrl(item.url),
-    updated: updatedAt(item.updatedAt),
+    owners: assignees.length === 0 && pulls ? people(item.author ?? item.user) : assignees,
+    url: webUrl(item.html_url) ?? webUrl(item.url),
+    updated: updatedAt(item.updatedAt ?? item.updated_at),
   };
 }
 
@@ -398,14 +400,20 @@ function isPull(value: Value): boolean {
   const item = record(value);
   return (
     item !== null &&
-    ("isDraft" in item || "mergedAt" in item || "headRefName" in item || item.state === "MERGED" || /\/pull\/\d+/.test(String(item.url ?? "")))
+    ("isDraft" in item ||
+      "mergedAt" in item ||
+      "headRefName" in item ||
+      "draft" in item ||
+      "merged_at" in item ||
+      item.state === "MERGED" ||
+      /\/pull\/\d+/.test(String(item.html_url ?? item.url ?? "")))
   );
 }
 
 /**
  * A board from a list of cards (`{title, status?, key?|id?, …}` or bare
- * titles), `bb tasks list --json` (`{tasks}`), or `gh issue list --json` /
- * `gh pr list --json`. `columns` names the statuses to show, in order (empty
+ * titles), `bb tasks list --json` (`{tasks}`), `gh issue list --json` /
+ * `gh pr list --json`, or REST API pull requests. `columns` names the statuses to show, in order (empty
  * ones too); without it the known workflow order applies, unknown statuses
  * follow in first-seen order, and empty columns are left out.
  */
@@ -433,11 +441,11 @@ export function readBoard(items: Field, columns?: Field): Read<Board> {
     if (github) source = pulls ? "pulls" : "issues";
     raw = items.map((item) => (github ? githubCard(item, pulls) : listCard(item)));
   } else if (items === undefined || items === null) {
-    return { ok: false, error: "Board needs a list of items, or Load a bb tasks or gh issue/pr list --json file" };
+    return { ok: false, error: "Board needs a list of items, or Load a bb tasks, gh issue/pr list --json or REST API pull requests file" };
   } else {
     return {
       ok: false,
-      error: "Board needs a list of {title, status?} items, bb tasks list --json ({tasks: […]}) or gh issue/pr list --json",
+      error: "Board needs a list of {title, status?} items, bb tasks list --json ({tasks: […]}), gh issue/pr list --json or REST API pull requests",
     };
   }
 

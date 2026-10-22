@@ -56,15 +56,29 @@ const MAP_EXAMPLE = `\`\`\`ui
 Card("Day 1", [Map([{name: "Belém Tower, Lisbon", note: "Opens 9:30"}, {name: "Pena Palace, Sintra"}], route: true)])
 \`\`\``;
 
+/** The GitHub CLI, whose `--json` takes field lists. Any other pull request CLI prints the REST API's JSON from a bare `--json`. */
+export const GITHUB_CLI = "gh";
+
+function pullRequestLines(cli: string): { checks: string; pulls: string } {
+  if (cli === GITHUB_CLI) return { checks: "", pulls: "" };
+  return {
+    checks: `; a pull request's checks: \`${cli} pr checks <n> --json\` (it may exit non-zero while checks are pending)`,
+    pulls: `; pull requests from \`${cli} pr list --json\``,
+  };
+}
+
 /**
  * Engineering and management work, contributed as its own section
  * (bb.agents.contributeInstructions), which BB places after the tool sections
  * and right before AGENT_INSTRUCTIONS. Says, per kind of tool output, which
  * command saves it and which component reads it, so results are shown from
  * the file instead of pasted. It no longer calls prose "the worse answer":
- * with that line, replies after a task shrank to one sentence plus UI.
+ * with that line, replies after a task shrank to one sentence plus UI. The
+ * pull request commands follow the `pullRequestCli` setting (server.ts).
  */
-export const CODE_WORK_INSTRUCTIONS = `# Inline UI for code work
+export function codeWorkInstructions(cli: string): string {
+  const { checks, pulls } = pullRequestLines(cli);
+  return `# Inline UI for code work
 After a task, say in prose what you did, what you found and what is left. Show a tool's output through its component, read from the file the tool saved (save as you run, in the format it reads, to $BB_THREAD_STORAGE; /tmp reports load too), instead of pasting or retyping it. Tests or a build that fully passed need one sentence and no block.
 - tests → Tests: \`vitest run --reporter=json --outputFile=$BB_THREAD_STORAGE/tests.json\`, \`jest --json --outputFile=…\`, JUnit XML
 - a build, server or command log → Logs(Load(log), command, exit code): \`cmd > $BB_THREAD_STORAGE/build.log 2>&1\`
@@ -72,11 +86,11 @@ After a task, say in prose what you did, what you found and what is left. Show a
 - lint, type errors, a code review → Findings: \`eslint -f json\`, \`tsc --noEmit --pretty false\`, SARIF, \`ruff check --output-format json\`; a review as [{severity, title, file, line, detail, fix}]
 - coverage → Coverage(Load(…)): \`vitest run --coverage --coverage.reporter=lcov --coverage.reportsDirectory=$BB_THREAD_STORAGE/cov\`, then cov/lcov.info; or coverage-summary.json
 - outdated or vulnerable packages → Dependencies: \`npm outdated --json --long\`, \`npm audit --json\`, \`pip list --outdated --format=json\`
-- a CI run → Pipeline: \`gh run view <id> --json name,displayTitle,status,conclusion,event,headBranch,headSha,url,createdAt,updatedAt,jobs\`
+- a CI run → Pipeline: \`gh run view <id> --json name,displayTitle,status,conclusion,event,headBranch,headSha,url,createdAt,updatedAt,jobs\`${checks}
 - timings you measured (before/after, A vs B) → Benchmark([{name, before, after, unit}]) or Load(\`hyperfine --export-json\`); a page load → Waterfall(Load(a HAR)); what takes space → Treemap(Load(\`du -k -d 2 <dir>\` or an esbuild metafile))
 - an API response → Json(Load(…)) from \`curl -s -o\`
 - what you changed → Changes(); a commit → Changes(sha); this branch's commits → Commits(); the pull request → PullRequest(); subthreads → Threads()
-- tasks or issues → Board(Load(…)) from \`bb tasks list --project <KEY> --json\` or \`gh issue list --json number,title,state,labels,assignees,url,updatedAt\`
+- tasks or issues → Board(Load(…)) from \`bb tasks list --project <KEY> --json\` or \`gh issue list --json number,title,state,labels,assignees,url,updatedAt\`${pulls}
 - this project's worktrees and their threads → Environments()
 - work the user approves before you start → Plan(steps); options against criteria → Decision(options, criteria); effort → Estimate(tasks); workstream health → Status(items); dated phases → Roadmap(items)
 ${componentLines(["Evidence"])}
@@ -93,6 +107,7 @@ Card("Audit log for admin actions", [Plan([{title: "Append-only audit table", fi
 \`\`\`ui
 Card("Which queue?", [Decision([{name: "pg-boss", scores: [4, 5], pros: ["Uses our Postgres"]}, {name: "BullMQ", scores: [5, 2], cons: ["Needs Redis"]}], ["Throughput", "Ops cost"])])
 \`\`\``;
+}
 
 /**
  * When to write UI, where, and how questions work, tuned on a 64-prompt

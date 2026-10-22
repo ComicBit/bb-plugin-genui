@@ -123,6 +123,36 @@ describe("readBoard", () => {
     expect(board.columns.every((column) => column.cards.every((card) => card.closed === (column.status === "merged")))).toBe(true);
   });
 
+  it("reads REST API pull requests: drafts, merged closed pulls, users as owners, web links", () => {
+    const pull = (number: number, fields: Record<string, Value>): Value => ({
+      number,
+      title: `PR ${number}`,
+      state: "open",
+      draft: false,
+      merged_at: null,
+      assignees: [],
+      labels: [],
+      user: { login: "ana.lima@example.com" },
+      url: `https://github.example.com/api/v3/repos/acme/app/pulls/${number}`,
+      html_url: `https://github.example.com/acme/app/pull/${number}`,
+      updated_at: "2026-10-21T22:17:13Z",
+      ...fields,
+    });
+    const board = ok(
+      readBoard([
+        pull(1, { draft: true }),
+        pull(2, {}),
+        pull(3, { state: "closed", merged_at: "2026-10-20T10:00:00Z" }),
+        pull(4, { state: "closed" }),
+      ]),
+    );
+    expect(board.source).toBe("pulls");
+    expect(board.columns.map((column) => column.status)).toEqual(["draft", "open", "merged", "closed"]);
+    const draft = board.columns[0]!.cards[0]!;
+    expect(draft).toMatchObject({ key: "#1", owners: ["ana.lima@example.com"], url: "https://github.example.com/acme/app/pull/1" });
+    expect(draft.updated).toBe(Date.parse("2026-10-21T22:17:13Z"));
+  });
+
   it("reads a written list: aliases, unknown statuses after the workflow, no status last", () => {
     const board = ok(
       readBoard([

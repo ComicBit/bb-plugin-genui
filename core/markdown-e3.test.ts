@@ -77,7 +77,7 @@ _none_`);
     const many = Array.from({ length: 23 }, (_, index) => `{title: "Task ${index + 1}", status: "todo"}`).join(", ");
     const out = markdown(`Board([${many}])`);
     expect(out).toContain("- Task 20\n_… and 3 more items_");
-    expect(markdown(`Board("nope")`)).toBe("_(Board needs a list of {title, status?} items, bb tasks list --json ({tasks: […]}) or gh issue/pr list --json)_");
+    expect(markdown(`Board("nope")`)).toBe("_(Board needs a list of {title, status?} items, bb tasks list --json ({tasks: […]}), gh issue/pr list --json or REST API pull requests)_");
   });
 });
 

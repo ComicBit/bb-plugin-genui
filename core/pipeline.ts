@@ -1,7 +1,8 @@
-// What `Pipeline` shows, from the three shapes it takes: `gh run view --json
+// What `Pipeline` shows, from the four shapes it takes: `gh run view --json
 // name,displayTitle,status,conclusion,event,headBranch,headSha,url,createdAt,updatedAt,jobs`
 // (or any subset that has `jobs`), `gh pr checks --json
-// name,state,bucket,link,startedAt,completedAt,workflow`, and a hand-written
+// name,state,bucket,link,startedAt,completedAt,workflow`, the REST API's
+// check runs and combined commit status as `{check_runs, statuses}`, and a hand-written
 // list of stages `{name, status, duration?, url?, jobs?: [{name, status,
 // duration?, url?, steps?}]}`. Pure: no React, no DOM.
 import type { Value } from "./types";
@@ -81,7 +82,7 @@ export interface PipelineRun {
 export type PipelineResult = { readonly ok: true; readonly run: PipelineRun } | { readonly ok: false; readonly error: string };
 
 const SHAPE_HINT =
-  "Pipeline needs gh run view --json …,jobs, gh pr checks --json name,state,bucket,…, or a list of stages [{name, status, jobs?}]";
+  "Pipeline needs gh run view --json …,jobs, gh pr checks --json name,state,bucket,…, the REST API's {check_runs, statuses}, or a list of stages [{name, status, jobs?}]";
 
 /** Inferred stages past this many read as noise: the jobs show as one list. */
 const MAX_INFERRED_STAGES = 8;
@@ -425,6 +426,44 @@ function runIdOf(link: string | null): string | null {
   return link === null ? null : (/\/actions\/runs\/(\d+)/.exec(link)?.[1] ?? null);
 }
 
+/** The REST API's check runs and combined commit status of one ref, side by side. */
+function isRestChecks(fields: Fields): boolean {
+  return Array.isArray(fields.check_runs) || Array.isArray(fieldsOf(fields.statuses)?.statuses);
+}
+
+/** REST check runs and commit statuses as `gh pr checks --json` entries, grouped by the app that reported them. */
+function restChecks(fields: Fields): Value[] {
+  const runs = Array.isArray(fields.check_runs) ? fields.check_runs : [];
+  const statuses = fieldsOf(fields.statuses)?.statuses;
+  const checks: Value[] = [];
+  for (const value of runs) {
+    const run = fieldsOf(value);
+    if (run === null) continue;
+    const app = fieldsOf(run.app);
+    checks.push({
+      name: run.name ?? null,
+      state: run.conclusion ?? run.status ?? null,
+      startedAt: run.started_at ?? null,
+      completedAt: run.completed_at ?? null,
+      link: run.details_url ?? run.html_url ?? null,
+      workflow: app === null ? null : (str(app.slug) ?? str(app.name)),
+    });
+  }
+  for (const value of Array.isArray(statuses) ? statuses : []) {
+    const status = fieldsOf(value);
+    if (status === null) continue;
+    checks.push({
+      name: status.context ?? null,
+      state: status.state ?? null,
+      startedAt: status.created_at ?? null,
+      completedAt: status.state === "pending" ? null : (status.updated_at ?? null),
+      link: status.target_url ?? null,
+      workflow: null,
+    });
+  }
+  return checks;
+}
+
 function isCheck(value: Value): boolean {
   const fields = fieldsOf(value);
   return fields !== null && (fields.bucket !== undefined || (fields.state !== undefined && (fields.link !== undefined || fields.workflow !== undefined)));
@@ -599,6 +638,7 @@ function fromList(values: readonly Value[], header: Fields | null): PipelineRun 
 export function readPipeline(value: Value | undefined): PipelineResult {
   const fields = fieldsOf(value);
   if (Array.isArray(value) && value.some(isCheck)) return { ok: true, run: fromChecks(value) };
+  if (fields !== null && isRestChecks(fields)) return { ok: true, run: fromChecks(restChecks(fields)) };
   if (fields !== null && Array.isArray(fields.jobs) && (fields.headSha !== undefined || fields.databaseId !== undefined || fields.conclusion !== undefined || isGhJobList(fields.jobs))) {
     return { ok: true, run: fromGhRun(fields) };
   }

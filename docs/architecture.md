@@ -20,7 +20,11 @@ The internals behind [the README](../README.md): how agents learn the language, 
      after a task are where models fall back to pasted output and markdown
      tables. A contribution only gets the thread id, so it goes to the
      threads `configure` last chose; BB resolves `configure` first within a
-     session's resolution.
+     session's resolution. The `pullRequestCli` setting (a command name, `gh`
+     by default) picks which pull request commands this section and
+     `ui_examples` name: gh's with field lists, or `<name> pr list --json`
+     and `<name> pr checks <n> --json` for a CLI that prints the REST API's
+     JSON. Board and Pipeline read both.
    - `AGENT_INSTRUCTIONS` (`bb.agents.configure`) comes last, closest to the
      conversation. It says what the user wants shown (anything better seen
      or used than read) and that a markdown table, numbered steps, pasted
@@ -408,14 +412,14 @@ the instructions list it.
     the uncovered lines shown in the code.
   - Dependencies: npm/pnpm outdated, npm/pnpm audit or pip outdated, grouped
     by semver bump and severity.
-  - Pipeline: `gh run view` or `gh pr checks` JSON, or stages, with the
+  - Pipeline: `gh run view`, `gh pr checks` or REST check runs JSON, or stages, with the
     failed step of a failed job.
   - Benchmark (before/after, hyperfine, vitest bench, every run of a
     repeated experiment; rows measured under different conditions read "not
     comparable"), Waterfall (spans, a HAR, a Chrome trace) and Treemap
     (sizes, an esbuild metafile, `du`).
 - Manage: Board (a list, `bb tasks list --json`, `gh issue/pr list
-  --json`), Roadmap (a Gantt), Status (project health), Plan (steps the
+  --json`, REST API pull requests), Roadmap (a Gantt), Status (project health), Plan (steps the
   user approves in one message), Decision (a weighted matrix whose weights
   the user tunes), Estimate (three-point, P50/P80/P90), and Environments,
   which reads the project's checkouts and worktrees from BB: branch,

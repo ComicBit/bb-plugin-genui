@@ -4,7 +4,8 @@ import { collectLoads, compile, dataKey, evaluate, formatDiagnostics, initialSta
 import {
   AGENT_INSTRUCTIONS,
   AGENT_INSTRUCTIONS_WEB_OFF,
-  CODE_WORK_INSTRUCTIONS,
+  codeWorkInstructions,
+  GITHUB_CLI,
   UI_REFERENCE,
   UI_REFERENCE_MORE,
   WEB_LOOKUPS_OFF,
@@ -16,7 +17,8 @@ describe("agent instructions", () => {
   it("fit BB's 4096-character cap per section", () => {
     expect(AGENT_INSTRUCTIONS.length).toBeLessThanOrEqual(4096);
     expect(AGENT_INSTRUCTIONS_WEB_OFF.length).toBeLessThanOrEqual(4096);
-    expect(CODE_WORK_INSTRUCTIONS.length).toBeLessThanOrEqual(4096);
+    expect(codeWorkInstructions(GITHUB_CLI).length).toBeLessThanOrEqual(4096);
+    expect(codeWorkInstructions("x".repeat(32)).length).toBeLessThanOrEqual(4096);
     expect(UI_REFERENCE.length).toBeLessThanOrEqual(4096);
     expect(UI_REFERENCE_MORE.length).toBeLessThanOrEqual(4096);
   });
@@ -29,14 +31,14 @@ describe("agent instructions", () => {
 
   // The Evidence group's signatures ride on the code-work section, which every session that gets the references also gets.
   it("list every component and action the parser accepts", () => {
-    const reference = `${UI_REFERENCE}\n${UI_REFERENCE_MORE}\n${CODE_WORK_INSTRUCTIONS}`;
+    const reference = `${UI_REFERENCE}\n${UI_REFERENCE_MORE}\n${codeWorkInstructions(GITHUB_CLI)}`;
     for (const name of [...Object.keys(COMPONENTS), ...Object.keys(ACTIONS)]) {
       expect(reference, name).toContain(`${name}(`);
     }
   });
 
   it("carry examples that compile and render without errors", () => {
-    const examples = [...`${AGENT_INSTRUCTIONS}\n${CODE_WORK_INSTRUCTIONS}`.matchAll(/```ui\n([\s\S]*?)\n```/g)].map((match) => match[1]);
+    const examples = [...`${AGENT_INSTRUCTIONS}\n${codeWorkInstructions(GITHUB_CLI)}`.matchAll(/```ui\n([\s\S]*?)\n```/g)].map((match) => match[1]);
     expect(examples.length).toBeGreaterThan(3);
     for (const example of examples) {
       const compiled = compile(example);

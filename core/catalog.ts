@@ -552,7 +552,7 @@ export const COMPONENTS = {
   Pipeline: {
     group: "Dev",
     params: [{ name: "run", kind: "any" }],
-    summary: "a CI run: [{name, status, jobs?}] or a Load()ed gh run",
+    summary: "a CI run: [{name, status, jobs?}] or a Load()ed gh run, gh pr checks or REST check runs",
   },
   Benchmark: {
     group: "Dev",

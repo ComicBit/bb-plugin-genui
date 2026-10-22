@@ -15,8 +15,10 @@
 //   Changes, Commits, PullRequest and Threads, and keeps what Changes and
 //   Commits first showed per reply block; and its project's environments
 //   (project/environments.ts) for Environments,
-// - declares the `animations` setting, which only the page reads.
-import { cliCommand, defineCli, defineRpcContract, PluginCliError, type BbPluginApi } from "@get-bb/plugin-sdk";
+// - declares the `animations` setting, which only the page reads, and the
+//   `pullRequestCli` setting, which names the pull request CLI agents are
+//   told to run (gh, or one that prints the REST API's JSON).
+import { cliCommand, defineCli, defineRpcContract, PluginCliError, type BbPluginApi, type PluginSettingDescriptors } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 import {
   listGallery,
@@ -48,7 +50,14 @@ import {
   type EnvironmentsResult,
 } from "./core/project";
 import { examplesReport } from "./examples";
-import { AGENT_INSTRUCTIONS, AGENT_INSTRUCTIONS_WEB_OFF, CODE_WORK_INSTRUCTIONS, UI_REFERENCE, UI_REFERENCE_MORE } from "./instructions";
+import {
+  AGENT_INSTRUCTIONS,
+  AGENT_INSTRUCTIONS_WEB_OFF,
+  codeWorkInstructions,
+  GITHUB_CLI,
+  UI_REFERENCE,
+  UI_REFERENCE_MORE,
+} from "./instructions";
 import { foundImageSchema, wikiPhotoSchema } from "./web/commons";
 import { locatedSchema } from "./web/geocode";
 import { createWebLookups, MAX_TILE_ZOOM } from "./web/lookups";
@@ -71,6 +80,26 @@ export const MOTION_SETTINGS = {
     default: true,
   },
 } as const;
+
+/** A bare command name: the value is written into agent instructions. */
+const COMMAND_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
+
+export const PULL_REQUEST_SETTINGS = {
+  pullRequestCli: {
+    type: "string",
+    label: "Pull request CLI",
+    description:
+      "The command agents run to save pull requests and their checks for Board and Pipeline. gh, the default, is the GitHub CLI. Any other command must take gh's pr list and pr checks subcommands and print the GitHub REST API's JSON with a bare --json. Agent sessions started after a change use it.",
+    experimental_schema: z.string().regex(COMMAND_NAME, "A command name: letters, digits, '.', '_' or '-', at most 32 characters"),
+    default: GITHUB_CLI,
+  },
+} satisfies PluginSettingDescriptors;
+
+/** An empty value reads as the default. */
+function pullRequestCliOf(value: string): string {
+  const cli = value.trim();
+  return COMMAND_NAME.test(cli) ? cli : GITHUB_CLI;
+}
 
 const storedUiSchema = z.object({ source: z.string() });
 
@@ -224,6 +253,15 @@ export const rpcContract = defineRpcContract({
 export default async function plugin(bb: BbPluginApi) {
   const web = createWebLookups(bb);
   bb.settings.define(MOTION_SETTINGS);
+  const pullRequestSettings = bb.settings.define(PULL_REQUEST_SETTINGS);
+  /** As last read, for the instruction contributor, which can't wait. */
+  let codeWork = codeWorkInstructions(GITHUB_CLI);
+  void pullRequestSettings.get().then((current) => {
+    codeWork = codeWorkInstructions(pullRequestCliOf(current.pullRequestCli));
+  });
+  pullRequestSettings.onChange((next) => {
+    codeWork = codeWorkInstructions(pullRequestCliOf(next.pullRequestCli));
+  });
   /** Image searches and Wikipedia photos (Map places) for markdown renderings: the photo found, or null (none, or lookups off). */
   const findImage = {
     search: async (query: string) => {
@@ -273,7 +311,7 @@ export default async function plugin(bb: BbPluginApi) {
     }),
     presentation: { label: { pending: "Reading UI examples", completed: "Read UI examples" }, suppress: true },
     async execute({ components }) {
-      const { ok, text } = await examplesReport(components);
+      const { ok, text } = await examplesReport(components, pullRequestCliOf((await pullRequestSettings.get()).pullRequestCli));
       return { content: [{ type: "text", text }], isError: !ok };
     },
   });
@@ -299,7 +337,7 @@ export default async function plugin(bb: BbPluginApi) {
     const instructions = web.isOn() ? AGENT_INSTRUCTIONS : AGENT_INSTRUCTIONS_WEB_OFF;
     return { tools: ["check_ui", "ui_examples"], skills: [], instructions };
   });
-  bb.agents.contributeInstructions(({ threadId }) => (personThreads.has(threadId) ? CODE_WORK_INSTRUCTIONS : null));
+  bb.agents.contributeInstructions(({ threadId }) => (personThreads.has(threadId) ? codeWork : null));
 
   bb.rpc.register(rpcContract, {
     async get_ui({ id }) {

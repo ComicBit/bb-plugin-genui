@@ -132,6 +132,56 @@ describe("readPipeline: gh pr checks --json", () => {
   });
 });
 
+describe("readPipeline: REST check runs and commit statuses", () => {
+  it("reads REST check runs by app and commit statuses as other checks", () => {
+    const run = read({
+      check_runs: [
+        {
+          name: "reviews",
+          status: "in_progress",
+          conclusion: null,
+          started_at: null,
+          completed_at: null,
+          details_url: "https://example.com/reviews",
+          html_url: "https://github.example.com/acme/app/checks/1",
+          app: { name: "certification@example.com", slug: "certification" },
+        },
+        {
+          name: "build",
+          status: "completed",
+          conclusion: "failure",
+          started_at: "2026-10-21T10:00:00Z",
+          completed_at: "2026-10-21T10:05:00Z",
+          details_url: null,
+          html_url: "https://github.example.com/acme/app/checks/2",
+          app: { slug: "buildkite" },
+        },
+      ],
+      statuses: {
+        state: "pending",
+        statuses: [
+          { context: "lint", state: "success", created_at: "2026-10-21T10:00:00Z", updated_at: "2026-10-21T10:01:00Z", target_url: "https://ci.example.com/lint" },
+          { context: "deploy", state: "pending", created_at: "2026-10-21T10:00:00Z", updated_at: "2026-10-21T10:02:00Z", target_url: null },
+        ],
+      },
+    });
+    expect(run).toMatchObject({ source: "checks", layout: "groups", status: "failure", jobCount: 4 });
+    expect(run.stages.map((stage) => stage.name)).toEqual(["buildkite", "certification", "Other checks"]);
+    const build = run.stages[0].jobs[0];
+    expect(build).toMatchObject({ name: "build", status: "failure", ms: 300_000, url: "https://github.example.com/acme/app/checks/2" });
+    expect(run.stages[1].jobs[0]).toMatchObject({ status: "in_progress", url: "https://example.com/reviews" });
+    expect(run.stages[2].jobs.map((job) => [job.name, job.status, job.ms])).toEqual([
+      ["deploy", "queued", null],
+      ["lint", "success", 60_000],
+    ]);
+  });
+
+  it("reads a commit with no checks yet", () => {
+    const run = read({ check_runs: [], statuses: { state: "pending", statuses: [] } });
+    expect(run).toMatchObject({ source: "checks", jobCount: 0 });
+  });
+});
+
 describe("readPipeline: a list of stages", () => {
   it("lays timed stages end to end and keeps a failing step's message", () => {
     const run = read([

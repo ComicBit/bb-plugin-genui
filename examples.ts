@@ -7,6 +7,7 @@ import { readFile } from "node:fs/promises";
 import { collectLoads, compile } from "./core";
 import { COMPONENTS, componentSignature, type ComponentName } from "./core/catalog";
 import { listGallery, loadGalleryFile, packagePath, readGallerySpec } from "./data-source";
+import { GITHUB_CLI } from "./instructions";
 
 /**
  * What a ```app page can rely on (the bootstrap in ui/appDocument.ts runs before
@@ -72,16 +73,12 @@ const SOURCES: Partial<Record<ComponentName, string>> = {
     "npx vitest run --coverage --coverage.reporter=lcov --coverage.reportsDirectory=$BB_THREAD_STORAGE/coverage (needs @vitest/coverage-v8), then Load(\"$BB_THREAD_STORAGE/coverage/lcov.info\") · the json-summary reporter's coverage-summary.json · coverage json -o $BB_THREAD_STORAGE/coverage.json · go test -coverprofile=$BB_THREAD_STORAGE/coverage.out ./...",
   Dependencies:
     "npm outdated --json --long > $BB_THREAD_STORAGE/outdated.json || true · npm audit --json > $BB_THREAD_STORAGE/audit.json || true · both in one: Dependencies({outdated: Load(…), audit: Load(…)}) · pnpm outdated --format json · pip list --outdated --format=json",
-  Pipeline:
-    "gh run view <id> --json name,displayTitle,status,conclusion,event,headBranch,headSha,url,createdAt,updatedAt,jobs > $BB_THREAD_STORAGE/run.json · gh pr checks <n> --json name,state,bucket,link,startedAt,completedAt,workflow > $BB_THREAD_STORAGE/checks.json",
   Benchmark:
     "hyperfine --export-json $BB_THREAD_STORAGE/bench.json 'cmd a' 'cmd b' · vitest bench --run --outputJson $BB_THREAD_STORAGE/bench.json · or before/after numbers you measured, as the list",
   Waterfall:
     'a HAR: Playwright browser.newContext({recordHar: {path: "$BB_THREAD_STORAGE/page.har"}}), written when the context closes · a Chrome trace filtered to its slow events (jq \'{traceEvents: [.traceEvents[] | select(.ph == "X" and .dur > 1000)]}\') · or spans you timed, as the list',
   Treemap:
     "esbuild <entry> --bundle --metafile=$BB_THREAD_STORAGE/meta.json --outdir=/tmp/out · du -k -d 2 <dir> > $BB_THREAD_STORAGE/du.txt · or sizes as the list",
-  Board:
-    "bb tasks list --project <KEY> --json > $BB_THREAD_STORAGE/tasks.json · gh issue list --json number,title,state,labels,assignees,url,updatedAt > $BB_THREAD_STORAGE/issues.json · gh pr list --json number,title,state,isDraft,labels,assignees,author,url,updatedAt",
   Acceptance:
     "write {criteria: [{name, cells: {column: {status, note, evidence, by}}}]} to $BB_THREAD_STORAGE/acceptance.json as you check each criterion; a workflow gate's {matrix} or an owner's {complete, contract, blockers} loads as it is · evidence: file:line, a path, an https URL or an image",
   Transcript:
@@ -89,6 +86,23 @@ const SOURCES: Partial<Record<ComponentName, string>> = {
   Provenance:
     "append one stage per step to $BB_THREAD_STORAGE/trace.json as you go: {name, status, facts: {branch: git branch --show-current, sha: git rev-parse HEAD, build, device, url}, evidence: the log or receipt path}; pass what was asked for as expected",
 };
+
+const GH_RUN = "gh run view <id> --json name,displayTitle,status,conclusion,event,headBranch,headSha,url,createdAt,updatedAt,jobs > $BB_THREAD_STORAGE/run.json";
+const GH_ISSUES = "bb tasks list --project <KEY> --json > $BB_THREAD_STORAGE/tasks.json · gh issue list --json number,title,state,labels,assignees,url,updatedAt > $BB_THREAD_STORAGE/issues.json";
+
+/** Sources that read pull requests, in the commands of the `pullRequestCli` setting. */
+function pullRequestSources(cli: string): Partial<Record<ComponentName, string>> {
+  if (cli === GITHUB_CLI) {
+    return {
+      Pipeline: `${GH_RUN} · gh pr checks <n> --json name,state,bucket,link,startedAt,completedAt,workflow > $BB_THREAD_STORAGE/checks.json`,
+      Board: `${GH_ISSUES} · gh pr list --json number,title,state,isDraft,labels,assignees,author,url,updatedAt`,
+    };
+  }
+  return {
+    Pipeline: `${GH_RUN} · ${cli} pr checks <n> --json > $BB_THREAD_STORAGE/checks.json (it may exit non-zero while checks are pending)`,
+    Board: `${GH_ISSUES} · ${cli} pr list --json > $BB_THREAD_STORAGE/prs.json`,
+  };
+}
 
 /**
  * For components whose API is too big for the instructions: the whole of it,
@@ -146,7 +160,7 @@ async function describe(name: string): Promise<string> {
 }
 
 /** The tool's text: each requested component's signature and its examples, or the app guide for "app". */
-export async function examplesReport(components: readonly string[]): Promise<{ ok: boolean; text: string }> {
+export async function examplesReport(components: readonly string[], pullRequestCli: string): Promise<{ ok: boolean; text: string }> {
   const names = await listGallery();
   const sections: string[] = [];
   let ok = true;
@@ -162,7 +176,7 @@ export async function examplesReport(components: readonly string[]): Promise<{ o
     }
     const examples = examplesOf(names, component).slice(0, 3);
     const described = await Promise.all(examples.map(describe));
-    const source = SOURCES[component];
+    const source = pullRequestSources(pullRequestCli)[component] ?? SOURCES[component];
     sections.push(
       [
         `## ${componentSignature(component)}`,
