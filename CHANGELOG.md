@@ -4,6 +4,11 @@ What changed in each version of the Generative UI plugin for BB. Update an insta
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- PullRequest and the pull request column of Environments work again on BB 0.47. BB moved pull request status out of its SDK into the bundled GitHub PR Status plugin, so every PullRequest block said "BB couldn't read the pull request: t.environments.pullRequest is not a function". Both now read from that plugin, which must be enabled, so they need BB 0.47 or later; the other components still work on BB 0.45 and 0.46.
+
 ## [0.3.1] - 2026-10-22
 
 ### Fixed

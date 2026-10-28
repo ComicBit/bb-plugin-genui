@@ -110,7 +110,12 @@ function fakeBb(overrides: Fake = {}) {
         calls.push({ method: "diffPatch", args });
         return { outcome: "available", patches: args.paths.map((path) => ({ path, patch: `@@ ${path}`, truncated: false })) };
       },
-      pullRequest: async () => ({ outcome: "absent" }),
+    },
+    plugins: {
+      callRpc: async (args: { input: { keys: string[] }; outputSchema: { parse: (value: unknown) => unknown } }) => {
+        calls.push({ method: "plugins.callRpc", args });
+        return args.outputSchema.parse(Object.fromEntries(args.input.keys.map((key) => [key, { outcome: "absent" }])));
+      },
     },
     ...overrides,
   };
@@ -194,6 +199,57 @@ describe("Changes", () => {
       expect(await source.patches("thr_mine00", { kind: "branch" }, [path])).toMatchObject({ ok: false, reason: "invalid" });
     }
     expect(calls.some((call) => call.method === "diffPatch")).toBe(false);
+  });
+});
+
+describe("PullRequest", () => {
+  const rpc = (row: unknown) => ({
+    callRpc: async (args: { input: { keys: string[] }; outputSchema: { parse: (value: unknown) => unknown } }) =>
+      args.outputSchema.parse({ [args.input.keys[0]!]: row }),
+  });
+
+  it("reads the environment's pull request from the GitHub PR Status plugin", async () => {
+    const pullRequest = {
+      number: 7,
+      title: "Ship it",
+      url: "https://github.com/acme/app/pull/7",
+      state: "open",
+      baseRefName: "main",
+      headRefName: "feat",
+      checks: { state: "pending", passedCount: 2, failedCount: 0, pendingCount: 1, totalCount: 3 },
+      review: { state: "review_requested", reviewRequestCount: 1 },
+      mergeability: { state: "mergeable", mergeStateStatus: "CLEAN", mergeable: "MERGEABLE" },
+      attention: "checks_pending",
+      autoMerge: false,
+      inMergeQueue: null,
+      updatedAt: "2026-10-27T12:00:00Z",
+    };
+    const { source, calls } = fakeBb();
+    const absent = await source.pullRequest("thr_mine00");
+    expect(calls.find((call) => call.method === "plugins.callRpc")?.args).toMatchObject({
+      pluginId: "bb--github-pr-status",
+      method: "pullRequests",
+      input: { keys: ["env_a"] },
+    });
+    expect(absent).toMatchObject({ ok: true, branch: "feat", pullRequest: null });
+    const found = await fakeBb({ plugins: rpc({ outcome: "available", pullRequest }) }).source.pullRequest("thr_mine00");
+    expect(found).toMatchObject({
+      ok: true,
+      pullRequest: { number: 7, headRef: "feat", checks: { state: "pending", pending: 1 }, review: { requests: 1 }, inMergeQueue: false },
+    });
+  });
+
+  it("passes on why the plugin couldn't read it, and says so when the plugin isn't there", async () => {
+    const unread = await fakeBb({ plugins: rpc({ outcome: "unavailable", message: "Host is asleep" }) }).source.pullRequest("thr_mine00");
+    expect(unread).toMatchObject({ ok: false, message: "Host is asleep" });
+    const missing = await fakeBb({
+      plugins: {
+        callRpc: async () => {
+          throw new Error('plugin "bb--github-pr-status" is not enabled');
+        },
+      },
+    }).source.pullRequest("thr_mine00");
+    expect(missing).toMatchObject({ ok: false, message: expect.stringContaining("bb--github-pr-status") });
   });
 });
 
