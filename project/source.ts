@@ -4,6 +4,7 @@
 // environment; Threads lists only threads of that thread's project, and any
 // other id is "not found". Environments has its own source (environments.ts).
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import { z } from "zod";
 import {
   matchesPathFilter,
   RUNNING,
@@ -139,26 +140,70 @@ export function changedFile(file: DiffFileEntry, inline: boolean): ChangedFile {
   };
 }
 
-interface PullRequestEntry {
-  readonly number: number;
-  readonly title: string;
-  readonly url: string;
-  readonly state: PullRequestInfo["state"];
-  readonly baseRefName: string;
-  readonly headRefName: string;
-  readonly checks: {
-    readonly state: PullRequestInfo["checks"]["state"];
-    readonly passedCount: number;
-    readonly failedCount: number;
-    readonly pendingCount: number;
-    readonly totalCount: number;
-  };
-  readonly review: { readonly state: PullRequestInfo["review"]["state"]; readonly reviewRequestCount: number };
-  readonly mergeability: { readonly state: PullRequestInfo["mergeability"] };
-  readonly attention: PullRequestInfo["attention"];
-  readonly autoMerge: boolean;
-  readonly inMergeQueue: boolean | null;
-  readonly updatedAt: string;
+/** The plugin that owns pull request status since BB 0.47 (SDK 0.6.72 dropped `sdk.environments.pullRequest`). */
+export const PULL_REQUEST_PLUGIN = "bb--github-pr-status";
+
+const pullRequestEntrySchema = z.object({
+  number: z.number(),
+  title: z.string(),
+  url: z.string(),
+  state: z.enum(["open", "draft", "merged", "closed"]),
+  baseRefName: z.string(),
+  headRefName: z.string(),
+  checks: z.object({
+    state: z.enum(["passing", "failing", "pending", "no_checks", "unknown"]),
+    passedCount: z.number(),
+    failedCount: z.number(),
+    pendingCount: z.number(),
+    totalCount: z.number(),
+  }),
+  review: z.object({
+    state: z.enum(["approved", "changes_requested", "review_requested", "review_required", "none"]),
+    reviewRequestCount: z.number(),
+  }),
+  mergeability: z.object({ state: z.enum(["mergeable", "conflicts", "blocked", "draft", "unknown"]) }),
+  attention: z.enum([
+    "blocked",
+    "changes_requested",
+    "checks_failed",
+    "checks_pending",
+    "closed",
+    "conflicts",
+    "draft",
+    "merged",
+    "none",
+    "queued",
+    "ready_to_merge",
+    "review_requested",
+  ]),
+  autoMerge: z.boolean(),
+  inMergeQueue: z.boolean().nullable(),
+  updatedAt: z.string(),
+});
+type PullRequestEntry = z.infer<typeof pullRequestEntrySchema>;
+
+const pullRequestRowSchema = z.discriminatedUnion("outcome", [
+  z.object({ outcome: z.literal("available"), pullRequest: pullRequestEntrySchema }),
+  z.object({ outcome: z.literal("absent") }),
+  z.object({ outcome: z.literal("unavailable"), message: z.string() }),
+]);
+const pullRequestRowsSchema = z.record(z.string(), pullRequestRowSchema);
+
+/** The environment's pull request from the GitHub PR Status plugin: null when its branch has none. */
+export async function readPullRequest(
+  sdk: Sdk,
+  environmentId: string,
+): Promise<{ readonly ok: true; readonly pullRequest: PullRequestInfo | null } | { readonly ok: false; readonly message: string }> {
+  const rows = await sdk.plugins.callRpc({
+    pluginId: PULL_REQUEST_PLUGIN,
+    method: "pullRequests",
+    input: { keys: [environmentId] },
+    outputSchema: pullRequestRowsSchema,
+  });
+  const row = rows[environmentId];
+  if (row === undefined) return { ok: false, message: "GitHub PR Status returned nothing for this environment" };
+  if (row.outcome === "unavailable") return { ok: false, message: row.message };
+  return { ok: true, pullRequest: row.outcome === "available" ? pullRequestInfo(row.pullRequest) : null };
 }
 
 export function pullRequestInfo(pr: PullRequestEntry): PullRequestInfo {
@@ -547,16 +592,11 @@ export function createProjectSource(bb: BbPluginApi, storage: SnapshotStorage = 
         const environment = await threadEnvironment(sdk, threadId);
         if (!environment.ok) return environment;
         const [answer, env] = await Promise.all([
-          sdk.environments.pullRequest({ environmentId: environment.environmentId }),
+          readPullRequest(sdk, environment.environmentId),
           sdk.environments.get({ environmentId: environment.environmentId }),
         ]);
-        if (answer.outcome === "unavailable") return failure("unavailable", answer.message);
-        return {
-          ok: true,
-          branch: env.branchName,
-          pullRequest: answer.outcome === "available" ? pullRequestInfo(answer.pullRequest) : null,
-          fetchedAt: Date.now(),
-        };
+        if (!answer.ok) return failure("unavailable", answer.message);
+        return { ok: true, branch: env.branchName, pullRequest: answer.pullRequest, fetchedAt: Date.now() };
       } catch (cause) {
         return failure("unavailable", `BB couldn't read the pull request: ${errorMessage(cause)}`);
       }
