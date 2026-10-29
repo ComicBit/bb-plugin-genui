@@ -8,6 +8,7 @@ import { collectLoads, dataKey, evaluate, imageSearches, initialState, toMarkdow
 import { answersText } from "../core/answers";
 import type { Action, Diagnostic, Value } from "../core/types";
 import { GALLERY_SHEET, sheetFor, useBlockAnswers, type Selection } from "./answerSheet";
+import { takeSendIntent } from "./sendNow";
 import {
   DiagnosticList,
   exampleTitle,
@@ -273,7 +274,8 @@ export function LiveUi({
  * A block's questions on its thread's answer sheet (ui/answerSheet.ts),
  * for ```ui blocks and apps alike: a pick is staged into the composer's
  * draft, sent at once only when the thread has no composer on screen, and
- * shown as a preview in the gallery. `position` places a question within
+ * shown as a preview in the gallery. A pick made with ⌘ held (Ctrl off
+ * macOS) is staged, then sends the user's whole message (ui/sendNow.ts). `position` places a question within
  * its block.
  */
 export function useBlockAnswerTarget(
@@ -291,8 +293,18 @@ export function useBlockAnswerTarget(
   }, [superseded, sheet, stateKey, block]);
   const stage = useCallback(
     async (question: string, answer: { readonly text: string; readonly selection: Selection } | null) => {
+      const sendNow = mode === "composer" && takeSendIntent();
+      const send = async () => {
+        try {
+          await sheet.send();
+        } catch (cause) {
+          toast.error(cause instanceof Error ? cause.message : String(cause));
+        }
+      };
       if (answer === null) {
-        sheet.withdraw(stateKey, question);
+        // ⌘ on the picked answer sends it rather than taking it back out.
+        if (sendNow) await send();
+        else sheet.withdraw(stateKey, question);
         return;
       }
       if (mode === "direct" && target.kind === "thread") {
@@ -315,6 +327,7 @@ export function useBlockAnswerTarget(
         text: answer.text,
         selection: answer.selection,
       });
+      if (sendNow) await send();
     },
     [sheet, stateKey, mode, target, position],
   );

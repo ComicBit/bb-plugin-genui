@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { SEND_NOW_HINT } from "../sendNow";
 import type { Action } from "../../core/types";
 import { ACTION_GLYPHS, actionIntent, sendEffect } from "./action-logic";
 
@@ -11,14 +12,14 @@ describe("actionIntent", () => {
   it("names each action that leaves the block with its glyph and what it carries", () => {
     expect(actionIntent([send("Open a PR for this branch")], { send: "stage" })).toEqual({
       glyph: "Sent",
-      hint: "Add “Open a PR for this branch” to your message",
+      hint: `Add “Open a PR for this branch” to your message\n${SEND_NOW_HINT}`,
     });
     expect(actionIntent([open("https://example.com/docs")])).toEqual({ glyph: "ExternalLink", hint: "Open https://example.com/docs" });
     expect(actionIntent([copy("fix/upload-race")])).toEqual({ glyph: "Copy", hint: "Copy “fix/upload-race”" });
   });
 
   it("says what an answer does where it goes: into the message, sent at once, or back out", () => {
-    expect(actionIntent([send("Use Redis")], { send: "stage", shown: "Use Redis" })).toEqual({ glyph: "Sent", hint: "Add to your message" });
+    expect(actionIntent([send("Use Redis")], { send: "stage", shown: "Use Redis" })).toEqual({ glyph: "Sent", hint: `Add to your message\n${SEND_NOW_HINT}` });
     expect(actionIntent([send("Use Redis")], { send: "send", shown: "Use Redis" })).toEqual({ glyph: "Sent", hint: "Send as your reply" });
     expect(actionIntent([send("Open a PR for this branch")], { send: "send" }).hint).toBe("Send “Open a PR for this branch”");
     // Taking a pick back out runs nothing else.
@@ -42,14 +43,14 @@ describe("actionIntent", () => {
   });
 
   it("doesn't quote the text the control already shows, and says where it goes instead", () => {
-    expect(actionIntent([send(" Use\n Redis ")], { send: "stage", shown: "Use Redis" }).hint).toBe("Add to your message");
-    expect(actionIntent([send("Go with BullMQ.")], { send: "stage", shown: "Go with BullMQ" }).hint).toBe("Add to your message");
+    expect(actionIntent([send(" Use\n Redis ")], { send: "stage", shown: "Use Redis" }).hint).toBe(`Add to your message\n${SEND_NOW_HINT}`);
+    expect(actionIntent([send("Go with BullMQ.")], { send: "stage", shown: "Go with BullMQ" }).hint).toBe(`Add to your message\n${SEND_NOW_HINT}`);
     expect(actionIntent([send("Go with BullMQ. My weights: Throughput 3.")], { send: "stage", shown: "Go with BullMQ" }).hint).toBe(
-      "Add “Go with BullMQ. My weights: Throughput 3.” to your message",
+      `Add “Go with BullMQ. My weights: Throughput 3.” to your message\n${SEND_NOW_HINT}`,
     );
     expect(actionIntent([copy("fix/upload-race")], { shown: "fix/upload-race" }).hint).toBe("Copy to the clipboard");
     expect(actionIntent([send("Open a PR for this branch")], { send: "stage", shown: "Open the PR" }).hint).toBe(
-      "Add “Open a PR for this branch” to your message",
+      `Add “Open a PR for this branch” to your message\n${SEND_NOW_HINT}`,
     );
     expect(actionIntent([open("https://example.com/")], { shown: "https://example.com/" }).hint).toBe("Open https://example.com/");
   });
@@ -64,7 +65,7 @@ describe("actionIntent", () => {
       actionIntent([set("plan", "Pro"), copy("PRO-2026"), open("https://example.com/upgrade"), send("Go with Pro")], { send: "stage" }),
     ).toEqual({
       glyph: "Sent",
-      hint: "Copy “PRO-2026”\nOpen https://example.com/upgrade\nAdd “Go with Pro” to your message",
+      hint: `Copy “PRO-2026”\nOpen https://example.com/upgrade\nAdd “Go with Pro” to your message\n${SEND_NOW_HINT}`,
     });
     expect(actionIntent([copy("token"), open("https://example.com/settings")]).glyph).toBe("ExternalLink");
   });

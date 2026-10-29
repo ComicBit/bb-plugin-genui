@@ -3,6 +3,7 @@
 // a copy. Set only changes the block, where its effect shows anyway.
 import type { Action } from "../../core/types";
 import type { Answers } from "../runtime";
+import { SEND_NOW_HINT } from "../sendNow";
 
 /** The glyph of each action that leaves the block, by weight: a message, then a link, then a copy. */
 const GLYPHS = [
@@ -59,7 +60,7 @@ export function actionIntent(actions: readonly Action[], { send = "none", shown 
     switch (action.type) {
       case "send":
         if (!answers) return [];
-        if (send === "stage") return [words(action.text) === visible ? "Add to your message" : `Add “${clip(action.text)}” to your message`];
+        if (send === "stage") return [words(action.text) === visible ? "Add to your message" : `Add “${clip(action.text)}” to your message`, SEND_NOW_HINT];
         return [words(action.text) === visible ? "Send as your reply" : `Send “${clip(action.text)}”`];
       case "openUrl": {
         const url = openableLink(action.url);

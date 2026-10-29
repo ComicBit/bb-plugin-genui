@@ -172,7 +172,10 @@ The internals behind [the README](../README.md): how agents learn the language, 
 5. Interactions re-evaluate the spec locally, with no model call. State
    persists per block in `localStorage`. Inputs outside a Form are local
    what-if state and never reach the agent. Nothing the user picks is sent
-   on its own: the thread's composer is the answer sheet
+   on its own: the thread's composer is the answer sheet, and a pick made
+   with ⌘ held (Ctrl off macOS; `ui/sendNow.ts` reads the modifier once for
+   the page, in the capture phase) is staged and then sends the draft through
+   `composer.submit`, exactly as Enter would
    (`ui/answerSheet.ts`, pure rules in `core/answers.ts`). A question is a
    run of choice Buttons (no action: the label is the answer; `Send(text)`:
    that text), a Form, a Plan's Approve, a Decision's option, a FollowUps

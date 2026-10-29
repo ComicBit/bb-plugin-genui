@@ -2,6 +2,7 @@
 // A reply with two ```ui blocks (two React roots, as BB mounts them) against
 // a composer that keeps its draft as text plus mention ranges, like BB's.
 import { useSyncExternalStore } from "react";
+import { SEND_NOW_HINT } from "./sendNow";
 import { act, cleanup, fireEvent, render, within } from "@testing-library/react";
 import type * as PluginSdkApp from "@get-bb/plugin-sdk/app";
 import type { ComposerDraftReplacement, ComposerDraftSnapshot, ComposerMention, PluginComposerApi } from "@get-bb/plugin-sdk/app";
@@ -44,6 +45,13 @@ function fakeComposer(threadId: string, reports = true): FakeComposer {
     version++;
     for (const listener of [...listeners]) listener();
   };
+  /** The draft goes out, as BB's send button (or `submit`) does. */
+  const sendDraft = () => {
+    sent.push(draft);
+    set({ text: "", mentions: [], attachments: [] });
+    for (const listener of [...submittedListeners]) listener();
+    submitting = false;
+  };
   const handle = {
     scope: { kind: "thread", threadId },
     key: `thread:${threadId}`,
@@ -78,7 +86,7 @@ function fakeComposer(threadId: string, reports = true): FakeComposer {
       return submitting;
     },
     focus: vi.fn(),
-    submit: vi.fn(),
+    submit: vi.fn(async () => sendDraft()),
   };
   return {
     composer: handle as unknown as PluginComposerApi,
@@ -93,12 +101,7 @@ function fakeComposer(threadId: string, reports = true): FakeComposer {
       const result = next(draft);
       set({ text: result.text, mentions: [...(result.mentions ?? draft.mentions)], attachments: draft.attachments });
     },
-    send() {
-      sent.push(draft);
-      set({ text: "", mentions: [], attachments: [] });
-      for (const listener of [...submittedListeners]) listener();
-      submitting = false;
-    },
+    send: sendDraft,
     type(typed: string, at?: number) {
       let position = at ?? draft.text.length;
       for (const key of typed) {
@@ -433,5 +436,46 @@ describe("the composer is the answer sheet", () => {
     expect(bb.send).toHaveBeenCalledWith({ threadId: `thr_${thread}`, mode: "queue-if-active", input: [{ type: "text", text: "Pro", mentions: [] }] });
     // The Form keeps a fixed Send button there.
     expect(within(block2).getByRole("button", { name: "Send" })).toBeTruthy();
+  });
+});
+
+describe("a pick made with ⌘ held (Ctrl off macOS)", () => {
+  /** The platform's send-now modifier, as ui/sendNow.ts reads it. */
+  const modifier = SEND_NOW_HINT.startsWith("⌘") ? { metaKey: true } : { ctrlKey: true };
+
+  it("stages the pick, then sends the whole message as Enter would", async () => {
+    await act(async () => {
+      fireEvent.click(within(block1).getByRole("button", { name: "Pro" }), modifier);
+    });
+    expect(fake.composer.submit).toHaveBeenCalledTimes(1);
+    expect(fake.sent.map((draft) => draft.text)).toEqual(["Pro"]);
+    expect(fake.composer.draft.text).toBe("");
+    // Sent through the composer, never as a separate message.
+    expect(bb.send).not.toHaveBeenCalled();
+  });
+
+  it("sends what the user wrote and every staged answer along with it", async () => {
+    act(() => fake.edit(() => ({ text: "Thanks!" })));
+    fireEvent.click(within(block2).getByRole("checkbox", { name: "JSON" }));
+    await act(async () => {
+      fireEvent.click(within(block1).getByRole("button", { name: "Pro" }), modifier);
+    });
+    expect(fake.sent.map((draft) => draft.text)).toEqual(["Thanks!\n\nPro\nProject name: —\nWhich formats? JSON (not: CSV, XLSX)"]);
+  });
+
+  it("sends an answer already picked instead of taking it back out", async () => {
+    fireEvent.click(within(block1).getByRole("button", { name: "Pro" }));
+    await act(async () => {
+      fireEvent.click(within(block1).getByRole("button", { name: "Pro" }), modifier);
+    });
+    expect(fake.sent.map((draft) => draft.text)).toEqual(["Pro"]);
+  });
+
+  it("leaves a plain click as it was: the pick waits in the message", async () => {
+    await act(async () => {
+      fireEvent.click(within(block1).getByRole("button", { name: "Pro" }));
+    });
+    expect(fake.composer.submit).not.toHaveBeenCalled();
+    expect(fake.composer.draft.text).toBe("Pro");
   });
 });

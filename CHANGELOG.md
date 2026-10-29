@@ -4,6 +4,11 @@ What changed in each version of the Generative UI plugin for BB. Update an insta
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **⌘-click to send.** ⌘-click (Ctrl-click off macOS) on a pick in a reply puts it in your message and sends the whole message at once, exactly as pressing Enter would: your text, the other picks waiting there and any attachments go with it. ⌘-click on a pick already in your message sends it rather than taking it back out. A plain click works as before, and the hint of a control that goes into your message says so on a second line. It works for every answer control: Buttons, Decision's options, FollowUps, a Plan's Approve, the replying rows of a List.
+
 ## [0.3.1] - 2026-10-22
 
 ### Fixed

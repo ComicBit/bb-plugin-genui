@@ -32,7 +32,7 @@ Card("Estimate", [Form([
 ```
 ````
 
-BB shows a card with a plan switch, a seat slider and a live total. Moving the slider recomputes the total in the page, without another model call. Your first change puts `Plan: Pro` and `Seats: 12` in your message box; every later change keeps those lines up to date, and they reach the agent when you send.
+BB shows a card with a plan switch, a seat slider and a live total. Moving the slider recomputes the total in the page, without another model call. Your first change puts `Plan: Pro` and `Seats: 12` in your message box; every later change keeps those lines up to date, and they reach the agent when you send. ⌘-click (Ctrl-click off macOS) on a pick sends your message right away.
 
 ## What you get
 

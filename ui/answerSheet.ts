@@ -220,6 +220,19 @@ export class AnswerSheet {
     this.commit([...blocks, block]);
   }
 
+  /**
+   * Sends the user's whole message now, as pressing Enter would (a pick made
+   * with ⌘ held, ui/sendNow.ts). Writes any Form answer still waiting out its
+   * typing pause first. False when there is no composer that can submit.
+   */
+  async send(): Promise<boolean> {
+    const composer = this.composer();
+    if (composer === null || typeof composer.submit !== "function") return false;
+    flushAnswers();
+    await composer.submit({ experimental_data: null });
+    return true;
+  }
+
   /** Records an answer sent without the composer (no composer for the thread). */
   markSent(block: string, question: string, text: string): void {
     this.addSent(block, [{ question, text }]);

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, type ReactNode } from "react";
+import { SEND_NOW_HINT } from "../sendNow";
 import { createRoot, type Root } from "react-dom/client";
 import type * as PluginSdkApp from "@get-bb/plugin-sdk/app";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -105,7 +106,7 @@ describe("Button", () => {
   it("ends a reply choice with the send glyph, and its hint says the pick goes into the message, then back out", async () => {
     const button = renderButton({ label: "Use Redis" });
     expect(face(button)).toBe("Use Redis [Sent]");
-    expect(hintOnFocus(button)).toBe("Add to your message");
+    expect(hintOnFocus(button)).toBe(`Add to your message\n${SEND_NOW_HINT}`);
     await act(async () => button.click());
     expect(button.getAttribute("aria-pressed")).toBe("true");
     expect(face(button)).toBe("[Check] Use Redis [Sent]");
@@ -127,13 +128,13 @@ describe("Button", () => {
     const shown = [...button.querySelectorAll("span")].find((span) => span.textContent === label)!;
     Object.defineProperty(shown, "scrollWidth", { configurable: true, value: 480 });
     Object.defineProperty(shown, "clientWidth", { configurable: true, value: 220 });
-    expect(hintOnFocus(button)).toBe(`Add “${label}” to your message`);
+    expect(hintOnFocus(button)).toBe(`Add “${label}” to your message\n${SEND_NOW_HINT}`);
   });
 
   it("keeps the spec's icon in front and the action's glyph at the end", () => {
     const pr = renderButton({ label: "Open the PR", action: [send("Open a PR for this branch")], icon: "git-pull-request" });
     expect(face(pr)).toBe("[GitPullRequest] Open the PR [Sent]");
-    expect(hintOnFocus(pr)).toBe("Add “Open a PR for this branch” to your message");
+    expect(hintOnFocus(pr)).toBe(`Add “Open a PR for this branch” to your message\n${SEND_NOW_HINT}`);
 
     const notes = renderButton({ label: "Release notes", action: [open("https://github.com/vitest-dev/vitest/releases")], icon: "github" });
     expect(face(notes)).toBe("[Github] Release notes [ExternalLink]");
@@ -174,7 +175,7 @@ describe("Button", () => {
     const actions = [set("plan", "Pro"), copy("PRO-2026"), send("Go with Pro")];
     const button = renderButton({ label: "Go with Pro", action: actions, variant: "primary" });
     expect(face(button)).toBe("Go with Pro [Sent]");
-    expect(hintOnFocus(button)).toBe("Copy “PRO-2026”\nAdd to your message");
+    expect(hintOnFocus(button)).toBe(`Copy “PRO-2026”\nAdd to your message\n${SEND_NOW_HINT}`);
     await act(async () => button.click());
     expect(run).toHaveBeenCalledWith(actions.slice(0, 2));
     expect(button.getAttribute("aria-pressed")).toBe("true");
@@ -201,7 +202,7 @@ describe("List rows", () => {
       "ExternalLink",
       "ChevronRight",
     ]);
-    expect(rows.map(hintOnFocus)).toEqual(["Add to your message", "Open https://github.com/vitest-dev/vitest/releases", null]);
+    expect(rows.map(hintOnFocus)).toEqual([`Add to your message\n${SEND_NOW_HINT}`, "Open https://github.com/vitest-dev/vitest/releases", null]);
   });
 
   it("draw an action's glyph given as a row's icon once, at the end, and keep it on a row that doesn't act", () => {
@@ -239,6 +240,6 @@ describe("FollowUps", () => {
     render(<FollowUps props={{ prompts: ["How do I deploy this?"] }} />);
     const row = container.querySelector("button")!;
     expect(face(row)).toBe("How do I deploy this? [Sent]");
-    expect(hintOnFocus(row)).toBe("Add to your message");
+    expect(hintOnFocus(row)).toBe(`Add to your message\n${SEND_NOW_HINT}`);
   });
 });
