@@ -10,6 +10,7 @@
 import "./app.css";
 import { definePluginApp } from "@get-bb/plugin-sdk/app";
 import { FenceOverlay } from "./ui/FenceOverlay";
+import { LooseTagsOverlay } from "./ui/LooseTagsOverlay";
 import { FENCE_LANGUAGES, SlotFence } from "./ui/SlotFence";
 import { GalleryPanel } from "./ui/GalleryPanel";
 import { UiDirective } from "./ui/UiDirective";
@@ -27,6 +28,13 @@ export default definePluginApp((app) => {
       component: FenceOverlay,
     });
   }
+  // Component tags typed into markdown outside a ```ui fence never reach the
+  // fence slot or FenceOverlay; this thread-scoped scan recovers them.
+  app.slots.experimental_threadHeaderAction({
+    id: "ui-loose-tags",
+    title: "Generative UI",
+    component: LooseTagsOverlay,
+  });
   app.slots.messageDirective({ id: "ui", component: UiDirective });
   app.slots.navPanel({ id: "gallery", title: "Gen-UI Gallery", icon: "GridView", path: "gallery", component: GalleryPanel });
 });

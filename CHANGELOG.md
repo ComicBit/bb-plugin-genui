@@ -9,6 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 
 - A ```` ```ui ```` or ```` ```app ```` block no longer dies on a backslash. Unknown escapes such as `\S` in a regex, `\U` or `\S` in a Windows path, or `\Delta` in LaTeX text used to fail the whole block with `error: unknown escape` ("This UI couldn't be rendered"); they now stay as literal text with a warning. Documented escapes (`\n`, `\t`, `\r`, `\\`, `\"`, `\'`, `` \` ``, `\$`, `\u{hex}`, `\uXXXX`) decode as before, and an escaped quote or backtick still swallows the closer exactly like JavaScript.
+- A component tag an agent typed straight into markdown, outside any ```` ```ui ```` block — the classic `<Sources links={[…]} />` trailing a reply — used to sit there as raw text. A thread-scoped scan now recognizes a single self-closing tag naming a catalog component, rewrites it as the equivalent spec statement, and renders it with the same chrome as a real ```` ```ui ```` block (including its Source panel). A tag that does not parse or compile stays as the raw text, and the agent-facing reference now says to write components only inside a fence.
 
 ## [0.3.1] - 2026-10-22
 
