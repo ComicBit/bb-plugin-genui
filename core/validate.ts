@@ -150,6 +150,13 @@ function signature(name: string, spec: ComponentSpec): string {
   return `${name}(${params.join(", ")})`;
 }
 
+/** The source text of a synthesized state's initial, as shown in diagnostics. */
+function formatInitial(value: Expr): string {
+  if (value.type === "list") return "[]";
+  if (value.type === "literal") return JSON.stringify(value.value) ?? "null";
+  return "…";
+}
+
 function arityText([min, max]: Arity): string {
   if (max === Infinity) return `at least ${min} argument${min === 1 ? "" : "s"}`;
   if (min === max) return `${min} argument${min === 1 ? "" : "s"}`;
@@ -566,6 +573,8 @@ class Validator {
       }
     }
     this.coerceOptionsFirst(expr, spec, slots, sig);
+    this.coerceTabsItems(expr, spec, slots, sig);
+    this.coerceUndeclaredBindings(expr, spec, slots, sig);
     spec.params.forEach((param, index) => {
       const slot = slots[index];
       if (slot === undefined) {
@@ -607,20 +616,94 @@ class Validator {
     );
   }
 
+  /**
+   * Tabs as tab cards: `Tabs([{title: "…", children: […]}, …])` — the model
+   * wraps each tab in an object instead of the parallel `labels` and
+   * `children` lists the component takes. When every item is exactly a title
+   * plus a list of children, the call is split into those two lists as a
+   * warning; anything else — extra keys, non-object items, a second argument —
+   * keeps its errors, since the layout would then be a guess.
+   */
+  private coerceTabsItems(expr: CallExpr, spec: ComponentSpec, slots: (Expr | undefined)[], sig: string): void {
+    if (expr.name !== "Tabs" || expr.args.length !== 1 || expr.named.length > 0) return;
+    const labels = spec.params[0];
+    const children = spec.params[1];
+    if (labels?.name !== "labels" || labels.kind !== "list" || children?.kind !== "nodes" || children.optional) return;
+    const items = slots[0];
+    if (items === undefined || items.type !== "list" || slots[1] !== undefined) return;
+    const titles: Expr[] = [];
+    const panels: Expr[] = [];
+    for (const item of items.items) {
+      if (item.type !== "object" || item.entries.length !== 2) return;
+      const title = item.entries.find(
+        (entry) => (entry.key === "title" || entry.key === "label") && (entry.value.type === "literal" || entry.value.type === "template"),
+      );
+      const kids = item.entries.find((entry) => entry.key === "children" && entry.value.type === "list");
+      if (title === undefined || kids === undefined) return;
+      titles.push(title.value);
+      panels.push(kids.value);
+    }
+    const labelsList: Expr = { type: "list", items: titles, pos: items.pos };
+    const childrenList: Expr = { type: "list", items: panels, pos: items.pos };
+    slots[0] = labelsList;
+    slots[1] = childrenList;
+    // validate owns the parsed AST before it becomes the program (readonly is type-level).
+    (expr as unknown as { args: Expr[] }).args = [labelsList, childrenList];
+    this.diagnostics.report(
+      expr.pos,
+      `\`${expr.name}\` got its tabs as one list of {title, children}; split them into parallel labels and children: ${sig}`,
+      "warning",
+    );
+  }
+
   /** A fresh `$state`, unique across the program, for a synthesized binding. */
   private synthState(component: string, holds: ParamSpec["holds"], pos: Pos): string {
-    const value: Expr =
-      holds === "list"
-        ? { type: "list", items: [], pos }
-        : { type: "literal", value: holds === "number" ? 0 : holds === "boolean" ? false : "", pos };
     const base = component.toLowerCase();
     let name = base;
     let n = 1;
     while (this.states.has(name) || this.named.has(name)) name = `${base}${++n}`;
+    this.registerState(name, this.initialFor(holds, pos), pos);
+    return name;
+  }
+
+  /**
+   * An input bound to a state that is never declared: `Input($addr, …)` with
+   * no `$addr = …` anywhere, or the bare `Input(addr, …)` spelling. The model
+   * clearly means a state with that name, so declare it with the kind's
+   * neutral initial and say so — the input works instead of the block dying.
+   * A name already taken by a named value keeps its own error (that one is a
+   * genuine mixup between `$state` and `name = value`).
+   */
+  private coerceUndeclaredBindings(expr: CallExpr, spec: ComponentSpec, slots: (Expr | undefined)[], sig: string): void {
+    spec.params.forEach((param, index) => {
+      if (param.kind !== "binding") return;
+      const slot = slots[index];
+      if (slot === undefined) return;
+      const name = slot.type === "state" || slot.type === "ident" ? slot.name : undefined;
+      if (name === undefined || this.states.has(name) || this.named.has(name)) return;
+      const value = this.initialFor(param.holds, slot.pos);
+      this.registerState(name, value, slot.pos);
+      if (slot.type === "ident" && expr.args[index] === slot) {
+        slots[index] = { type: "state", name, pos: slot.pos };
+        (expr as unknown as { args: Expr[] }).args[index] = slots[index]!;
+      }
+      this.diagnostics.report(
+        slot.pos,
+        `\`${expr.name}\` binds \`$${name}\`, which is never declared; declared \`$${name} = ${formatInitial(value)}\` for you (declare states yourself at the top to keep control): ${sig}`,
+        "warning",
+      );
+    });
+  }
+
+  /** The neutral initial for a state kind: `[]` for a list, `""` for text/scalar. */
+  private initialFor(holds: ParamSpec["holds"], pos: Pos): Expr {
+    return holds === "list" ? { type: "list", items: [], pos } : { type: "literal", value: holds === "number" ? 0 : holds === "boolean" ? false : "", pos };
+  }
+
+  private registerState(name: string, value: Expr, pos: Pos): void {
     const decl: Decl = { name, value, pos };
     this.states.set(name, { index: this.stateDecls.length, decl });
     this.stateDecls.push(decl);
-    return name;
   }
 
   private checkParam(owner: string, param: ParamSpec, slot: Expr): void {
