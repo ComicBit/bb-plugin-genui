@@ -172,14 +172,25 @@ class Lexer {
     }
   }
 
-  /** Reads one escape after `\`; returns the decoded text or null after reporting. */
-  private escape(): string | null {
+  /**
+   * Reads one escape after `\` and returns the decoded text. Documented escapes
+   * decode (\n \t \r \\ \" \' \` \$ and \u{hex}). Anything else — `\S` in a regex,
+   * `\U` in a Windows path, `\Delta` in LaTeX — is kept as literal text with a
+   * warning instead of failing the whole block, so prose containing backslashes
+   * still renders.
+   */
+  private escape(): string {
     const pos = { line: this.line, column: this.column };
     this.advance();
     const c = this.src[this.i];
-    if (c !== undefined && ESCAPES[c] !== undefined) {
+    if (c === undefined) {
+      this.diagnostics.report(pos, "trailing `\\` at end of input; kept as literal text", "warning");
+      return "\\";
+    }
+    const known = ESCAPES[c];
+    if (known !== undefined) {
       this.advance();
-      return ESCAPES[c];
+      return known;
     }
     if (c === "u") {
       const braced = this.src[this.i + 1] === "{";
@@ -190,9 +201,21 @@ class Lexer {
         this.advance(end - this.i + (braced ? 1 : 0));
         return String.fromCodePoint(code);
       }
+      // Not a valid \u escape; fall through and keep the text as written.
     }
-    this.diagnostics.report(pos, `unknown escape \`\\${c ?? ""}\`; use \\n \\t \\\\ \\" \\' \\$ or \\u{hex}`);
-    return null;
+    if (c === "\n") {
+      // A backslash right before a line break is a stray trailing backslash;
+      // keep it and let the newline end the string/template as usual.
+      this.diagnostics.report(pos, "stray trailing `\\` before a line break; kept as literal text", "warning");
+      return "\\";
+    }
+    this.advance();
+    this.diagnostics.report(
+      pos,
+      `unknown escape \`\\${c}\`; kept as literal text (decode with \\n \\t \\\\ \\" \\' \\$ or \\u{hex})`,
+      "warning",
+    );
+    return "\\" + c;
   }
 
   private string(quote: string, pos: Pos): string | null {
@@ -209,7 +232,7 @@ class Lexer {
         return value;
       }
       if (c === "\\") {
-        value += this.escape() ?? "";
+        value += this.escape();
         continue;
       }
       value += c;
@@ -235,7 +258,7 @@ class Lexer {
         return { ...pos, t: "tpl", quasis, parts };
       }
       if (c === "\\") {
-        text += this.escape() ?? "";
+        text += this.escape();
       } else if (c === "$" && this.src[this.i + 1] === "{") {
         this.advance(2);
         quasis.push(text);
