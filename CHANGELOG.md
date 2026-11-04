@@ -4,6 +4,12 @@ What changed in each version of the Generative UI plugin for BB. Update an insta
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- A ```` ```ui ```` or ```` ```app ```` block no longer dies on a backslash. Unknown escapes such as `\S` in a regex, `\U` or `\S` in a Windows path, or `\Delta` in LaTeX text used to fail the whole block with `error: unknown escape` ("This UI couldn't be rendered"); they now stay as literal text with a warning. Documented escapes (`\n`, `\t`, `\r`, `\\`, `\"`, `\'`, `` \` ``, `\$`, `\u{hex}`, `\uXXXX`) decode as before, and an escaped quote or backtick still swallows the closer exactly like JavaScript.
+
 ## [0.3.1] - 2026-10-22
 
 ### Fixed
