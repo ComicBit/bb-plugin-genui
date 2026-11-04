@@ -4,6 +4,12 @@ What changed in each version of the Generative UI plugin for BB. Update an insta
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- A component tag an agent typed straight into markdown, outside any ```` ```ui ```` block — the classic `<Sources links={[…]} />` trailing a reply — used to sit there as raw text. A thread-scoped scan now recognizes a single self-closing tag naming a catalog component, rewrites it as the equivalent spec statement, and renders it with the same chrome as a real ```` ```ui ```` block (including its Source panel). A tag that does not parse or compile stays as the raw text, and the agent-facing reference now says to write components only inside a fence.
+
 ## [0.3.1] - 2026-10-22
 
 ### Fixed
