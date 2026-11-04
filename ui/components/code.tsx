@@ -97,13 +97,23 @@ export function viewerPath(path: string, content: string): string {
   return `${(hash >>> 0).toString(36)}/${path}`;
 }
 
+function SourceViewLoading() {
+  return (
+    <div role="status" aria-label="Loading code" className="space-y-2 px-4 pt-4">
+      {["w-3/4", "w-full", "w-5/6", "w-2/3", "w-full", "w-3/5"].map((width, index) => (
+        <div key={index} className={`h-3 animate-pulse rounded-sm bg-muted motion-reduce:animate-none ${width}`} />
+      ))}
+    </div>
+  );
+}
+
 /** How many times a hidden ancestor (an inactive tab, a closed Details) took away `element`'s box after it was shown. */
-function useTimesHidden(element: RefObject<HTMLElement | null>): number {
+function useTimesHidden(element: RefObject<HTMLElement | null>, enabled: boolean): number {
   const [count, setCount] = useState(0);
   // From layout, where BB's viewer starts watching too: a hide right after mounting isn't missed.
   useLayoutEffect(() => {
     const box = element.current;
-    if (box === null) return;
+    if (!enabled || box === null) return;
     let shown = false;
     const observer = new ResizeObserver(() => {
       const visible = box.getClientRects().length > 0;
@@ -112,7 +122,7 @@ function useTimesHidden(element: RefObject<HTMLElement | null>): number {
     });
     observer.observe(box);
     return () => observer.disconnect();
-  }, [element]);
+  }, [element, enabled]);
   return count;
 }
 
@@ -127,10 +137,26 @@ function useTimesHidden(element: RefObject<HTMLElement | null>): number {
  */
 export function SourceView({ content, path }: { content: string; path: string }) {
   const box = useRef<HTMLDivElement>(null);
-  const hidden = useTimesHidden(box);
+  const [showViewer, setShowViewer] = useState(() => typeof IntersectionObserver === "undefined");
+  const hidden = useTimesHidden(box, showViewer);
+  // BB mounts rows beyond the viewport. Let CodeFrame hold their height until the viewer is needed.
+  useEffect(() => {
+    const element = box.current;
+    if (showViewer || element === null) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) setShowViewer(true);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [showViewer]);
+
   return (
     <div ref={box}>
-      <HostSourceCode key={hidden} content={content} path={path} overflow="scroll" />
+      {showViewer ? (
+        <HostSourceCode key={hidden} content={content} path={path} overflow="scroll" />
+      ) : (
+        <SourceViewLoading />
+      )}
     </div>
   );
 }
