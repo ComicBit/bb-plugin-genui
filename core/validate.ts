@@ -202,11 +202,12 @@ export function validate(statements: readonly Statement[], diagnostics: Diagnost
 class Validator {
   private readonly states = new Map<string, { readonly index: number; readonly decl: Decl }>();
   private readonly named = new Map<string, Decl>();
+  /** `$state` declarations in source order, plus states synthesized by coercion. */
+  private readonly stateDecls: Decl[] = [];
 
   constructor(private readonly diagnostics: DiagnosticList) {}
 
   run(statements: readonly Statement[]): Program {
-    const stateDecls: Decl[] = [];
     const roots: Expr[] = [];
     for (const statement of statements) {
       if (statement.kind === "root") {
@@ -223,8 +224,8 @@ class Validator {
         const label = isState ? `$${statement.name}` : statement.name;
         this.diagnostics.report(statement.pos, `\`${label}\` is already declared on line ${previous.pos.line}`);
       } else if (isState) {
-        this.states.set(statement.name, { index: stateDecls.length, decl: statement });
-        stateDecls.push(statement);
+        this.states.set(statement.name, { index: this.stateDecls.length, decl: statement });
+        this.stateDecls.push(statement);
       } else {
         this.named.set(statement.name, statement);
       }
@@ -254,7 +255,7 @@ class Validator {
 
     this.checkCycles(namedRefs);
     const statesOf = this.transitiveStates(namedRefs);
-    stateDecls.forEach((decl, index) => {
+    this.stateDecls.forEach((decl, index) => {
       const refs = this.refs(decl.value);
       for (const ref of refs.named) used.add(ref.name);
       for (const ref of refs.states) {
@@ -281,7 +282,7 @@ class Validator {
     for (const [name, decl] of this.named) {
       if (!used.has(name)) this.diagnostics.report(decl.pos, `\`${name}\` is never used`, "warning");
     }
-    return { states: stateDecls, named: this.named, roots };
+    return { states: this.stateDecls, named: this.named, roots };
   }
 
   private refs(expr: Expr): Refs {
@@ -564,6 +565,7 @@ class Validator {
         slots[index] = arg.value;
       }
     }
+    this.coerceOptionsFirst(expr, spec, slots, sig);
     spec.params.forEach((param, index) => {
       const slot = slots[index];
       if (slot === undefined) {
@@ -572,6 +574,53 @@ class Validator {
         this.checkParam(expr.name, param, slot);
       }
     });
+  }
+
+  /**
+   * The options-as-first-argument slip: `Checklist(["a", "b"])` gives the
+   * choices but leaves out the `$state` the picks bind to. With at most one
+   * positional argument a list literal can only be the options, so the call is
+   * rewritten around a fresh state (`Checklist($checklist, ["a", "b"])`) as a
+   * warning: the block renders, and its Source panel shows the corrected call.
+   * Anything less unambiguous — more positional arguments, a value argument
+   * that is not a list — keeps its own errors.
+   */
+  private coerceOptionsFirst(expr: CallExpr, spec: ComponentSpec, slots: (Expr | undefined)[], sig: string): void {
+    const binding = spec.params[0];
+    const optionsIndex = spec.params.findIndex((param, index) => index === 1 && param.kind === "list" && !param.optional);
+    if (binding === undefined || binding.kind !== "binding" || optionsIndex < 0 || expr.args.length > 1) return;
+    const positionalList = slots[0] !== undefined && slots[0].type === "list";
+    if (slots[0] !== undefined && !positionalList) return;
+    const list = slots[optionsIndex] ?? (positionalList ? slots[0] : undefined);
+    if (list === undefined || list.type !== "list") return;
+    const name = this.synthState(expr.name, binding.holds, expr.pos);
+    slots[0] = { type: "state", name, pos: expr.pos };
+    slots[optionsIndex] = list;
+    // validate owns the parsed AST before it becomes the program: rewrite the
+    // positional arguments to the corrected layout (the type-level readonly
+    // guards against accidental writes; this one is deliberate).
+    (expr as unknown as { args: Expr[] }).args = [slots[0]!];
+    this.diagnostics.report(
+      expr.pos,
+      `\`${expr.name}\` got its options without a \`$state\` to store the picks in; bound them to \`$${name}\` (write the state yourself to name it): ${sig}`,
+      "warning",
+    );
+  }
+
+  /** A fresh `$state`, unique across the program, for a synthesized binding. */
+  private synthState(component: string, holds: ParamSpec["holds"], pos: Pos): string {
+    const value: Expr =
+      holds === "list"
+        ? { type: "list", items: [], pos }
+        : { type: "literal", value: holds === "number" ? 0 : holds === "boolean" ? false : "", pos };
+    const base = component.toLowerCase();
+    let name = base;
+    let n = 1;
+    while (this.states.has(name) || this.named.has(name)) name = `${base}${++n}`;
+    const decl: Decl = { name, value, pos };
+    this.states.set(name, { index: this.stateDecls.length, decl });
+    this.stateDecls.push(decl);
+    return name;
   }
 
   private checkParam(owner: string, param: ParamSpec, slot: Expr): void {
