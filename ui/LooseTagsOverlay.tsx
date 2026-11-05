@@ -114,11 +114,17 @@ export function LooseTagsOverlay({ threadId }: { threadId: string }) {
       current = blocks;
       flushSync(() => setBlocks(blocks));
     };
+    // Streams mutate the page constantly; scanning on every batch would walk
+    // every paragraph each frame. Coalesce: at most one scan per ~60 ms.
     const run = () => {
-      const { blocks, appeared } = scan(current, pluginId, threadId);
-      if (blocks === current) return;
-      if (appeared) commit(blocks);
-      else timer ??= window.setTimeout(() => commit(scan(current, pluginId, threadId).blocks), 60);
+      if (timer !== undefined) return;
+      timer = window.setTimeout(() => {
+        timer = undefined;
+        const { blocks, appeared } = scan(current, pluginId, threadId);
+        if (blocks === current) return;
+        if (appeared) commit(blocks);
+        else timer ??= window.setTimeout(() => commit(scan(current, pluginId, threadId).blocks), 60);
+      }, 60);
     };
     const observer = new MutationObserver((records) => {
       // Our own renders mutate the page too; they never add or change a paragraph.

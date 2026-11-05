@@ -88,3 +88,13 @@ describe("inputs bound to states that are never declared", () => {
     expect(errors('addr = "x"\nInput($addr, "Адрес")').length).toBeGreaterThanOrEqual(1);
   });
 });
+
+describe("binding named arguments rewritten to states (regression)", () => {
+  it("rewrites a bare ident inside a named binding argument", () => {
+    const src = 'Form([Checklist(value: picked, options: ["a", "b"])])';
+    const { program, diagnostics } = compile(src);
+    expect(program).not.toBeNull();
+    expect(diagnostics.filter((d) => d.severity === "error")).toHaveLength(0);
+    expect(initialState(program!)).toMatchObject({ picked: [] });
+  });
+});
