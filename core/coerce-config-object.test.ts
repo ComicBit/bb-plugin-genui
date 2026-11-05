@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compile } from "./index";
+import { compile, initialState } from "./index";
 
 const warnings = (src: string) => compile(src).diagnostics.filter((d) => d.severity === "warning").map((d) => d.message);
 const errors = (src: string) => compile(src).diagnostics.filter((d) => d.severity === "error").map((d) => d.message);
@@ -47,5 +47,15 @@ describe("arguments packed into one config object", () => {
 
   it("keeps its errors when a required parameter is still missing after the unwrap", () => {
     expect(errors('Table({columns: ["a"]})').length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("config object on a binding parameter (regression)", () => {
+  it("unwraps Input({value, label}) and declares the state", () => {
+    const src = 'Form([Input({value: $addr, label: "Адрес"}), Choice($proto, ["SSH"], label: "Как")])';
+    const { program, diagnostics } = compile(src);
+    expect(program).not.toBeNull();
+    expect(diagnostics.filter((d) => d.severity === "error")).toHaveLength(0);
+    expect(initialState(program!)).toMatchObject({ addr: "", proto: "" });
   });
 });

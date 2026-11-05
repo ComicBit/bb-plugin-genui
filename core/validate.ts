@@ -608,8 +608,12 @@ class Validator {
     slots[optionsIndex] = list;
     // validate owns the parsed AST before it becomes the program: rewrite the
     // positional arguments to the corrected layout (the type-level readonly
-    // guards against accidental writes; this one is deliberate).
-    (expr as unknown as { args: Expr[] }).args = [slots[0]!];
+    // guards against accidental writes; this one is deliberate). The options
+    // stay positional when they were positional; a named options argument
+    // keeps its named entry, so only the state goes positional.
+    const args: Expr[] = [slots[0]!];
+    if (positionalList) args.push(list);
+    (expr as unknown as { args: Expr[] }).args = args;
     this.diagnostics.report(
       expr.pos,
       `\`${expr.name}\` got its options without a \`$state\` to store the picks in; bound them to \`$${name}\` (write the state yourself to name it): ${sig}`,
@@ -674,8 +678,12 @@ class Validator {
     if (obj === undefined || obj.type !== "object" || obj.entries.length === 0) return;
     const landing = spec.params[0];
     const wanted = landing === undefined ? undefined : LITERAL_KINDS[landing.kind];
+    // A binding parameter always takes a `$state`: an object there is always
+    // the config-object slip, never data.
     const missingRequired = spec.params.some((param, index) => !param.optional && index > 0 && slots[index] === undefined);
-    const misplaced = wanted !== undefined && wanted !== "object" && !(landing.optional && obj.entries.every((entry) => entry.value.type === "literal" && entry.value.value === null));
+    const misplaced =
+      (landing !== undefined && landing.kind === "binding") ||
+      (wanted !== undefined && wanted !== "object" && !(landing.optional && obj.entries.every((entry) => entry.value.type === "literal" && entry.value.value === null)));
     if (!missingRequired && !misplaced) return;
     const named: NamedArg[] = [];
     for (const entry of obj.entries) {
@@ -726,9 +734,14 @@ class Validator {
       if (name === undefined || this.states.has(name) || this.named.has(name)) return;
       const value = this.initialFor(param.holds, slot.pos);
       this.registerState(name, value, slot.pos);
-      if (slot.type === "ident" && expr.args[index] === slot) {
-        slots[index] = { type: "state", name, pos: slot.pos };
-        (expr as unknown as { args: Expr[] }).args[index] = slots[index]!;
+      if (slot.type === "ident") {
+        // A bare spelling must become a real `$state` reference everywhere it
+        // appears: positionally, or inside a named argument.
+        const stateExpr: Expr = { type: "state", name, pos: slot.pos };
+        if (expr.args[index] === slot) (expr as unknown as { args: Expr[] }).args[index] = stateExpr;
+        const namedArg = expr.named.find((arg) => arg.value === slot);
+        if (namedArg !== undefined) (namedArg as { value: Expr }).value = stateExpr;
+        slots[index] = stateExpr;
       }
       this.diagnostics.report(
         slot.pos,

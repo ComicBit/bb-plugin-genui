@@ -61,3 +61,20 @@ describe("options given without a $state", () => {
     expect(warnings("Checklist($picked = [])")).toHaveLength(0);
   });
 });
+
+describe("options survive the rewrite (regression)", () => {
+  it("keeps the options list in the rewritten call's arguments", () => {
+    const { program } = compile('Checklist(["a", "b"])');
+    const call = program!.roots[0] as unknown as { args: { type: string; items: { value: string }[] }[] };
+    expect(call.args).toHaveLength(2);
+    expect(call.args[0].type).toBe("state");
+    expect(call.args[1].items.map((item) => item.value)).toEqual(["a", "b"]);
+  });
+
+  it("keeps positional options with a named label", () => {
+    const { program } = compile('Checklist(["a", "b"], label: "Pick")');
+    const call = program!.roots[0] as unknown as { args: unknown[]; named: { name: string }[] };
+    expect(call.args).toHaveLength(2);
+    expect(call.named.map((arg) => arg.name)).toEqual(["label"]);
+  });
+});
