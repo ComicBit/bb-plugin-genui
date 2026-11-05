@@ -3,11 +3,12 @@
 // and the DOM overlay mount this, so they behave the same.
 import { memo, useCallback, useMemo, useRef } from "react";
 import { useBbNavigate, useComposers, useSdk, type ExperimentalLiveFileTarget } from "@get-bb/plugin-sdk/app";
-import { compileStreaming } from "../core";
+import { compileStreaming, formatDiagnostics } from "../core";
 import { fileOpenTarget, THREAD_STORAGE_PREFIX } from "../core/file-target";
 import { useAnswerComposers } from "./answerSheet";
 import { AppBlock } from "./AppBlock";
 import { LiveUi, RenderFailure, type AnswerTarget } from "./LiveUi";
+import { ComposerGuard, FixRequestButton } from "./FixRequestButton";
 import { useAssetLoader, useAudioLoader, useImageLoader, useLoadedData, useTextLoader } from "./useLoadedData";
 import { useReplyIndex, useSuperseded } from "./useSuperseded";
 import { useMotionScope } from "./components/motion";
@@ -166,7 +167,21 @@ function UiFence({
 
   if (shown?.program == null) {
     return complete ? (
-      <RenderFailure source={code} diagnostics={result.diagnostics} />
+      <RenderFailure
+        source={code}
+        diagnostics={result.diagnostics}
+        fixRequest={
+          // A one-click repair loop: the button stages the errors and the
+          // source into the user's draft, so sending asks the agent to
+          // rebuild the block. The guard hides it where no composer runtime
+          // exists (the gallery, tests).
+          <ComposerGuard fallback={null}>
+            <FixRequestButton
+              request={`Fix this ui block — it fails to render:\n${formatDiagnostics(result.diagnostics)}\n\nSend the corrected block again and run check_ui on it. Source:\n\`\`\`ui\n${code}\n\`\`\``}
+            />
+          </ComposerGuard>
+        }
+      />
     ) : (
       <div
         {...motion}
