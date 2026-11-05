@@ -18,6 +18,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - `Board` takes an optional `label` for its heading, and a heading typed into `columns` — `Board(items, "Задачи")` — moves there with a warning instead of failing (`columns needs a list, got text`).
 - `Button("A", detail: …)` has no `detail` and its error now says where descriptions belong: `OptionCards` ({value, title?, detail?}) or `List` ({title, detail}).
 - **Keyed columns**: `Table({place: "№", model: "Модель"}, [[{place: 1, tone: "good"}, …]])` — a header map plus cells keyed to their column — is now flattened into the parallel `columns` + `rows` lists with a warning (per-cell `tone` is not supported by `Table` and is left out). Only fires when every header value is text, every row matches the header count, and every keyed cell carries exactly one column key.
+- **A space inside a state name** — `$п areas = […]` — now explains itself: "State names cannot contain spaces: this reads as state `$п` followed by `areas`…" instead of the bare separator error.
+- **Fix this block.** A failed block gains a button that stages a ready repair request — the diagnostics plus the source — into your message draft, so sending asks the agent to rebuild the block. Hidden where no thread composer exists (the gallery); it is one click instead of a dead end for any future failure shape.
 
 ## [0.3.1] - 2026-10-22
 

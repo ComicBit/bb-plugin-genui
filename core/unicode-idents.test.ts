@@ -26,3 +26,12 @@ describe("unicode identifiers", () => {
     expect(errors('2x = 1').some((message) => message.includes("invalid number"))).toBe(true);
   });
 });
+
+describe("a space inside a state name", () => {
+  it("explains the space-in-name mistake in the parse error", () => {
+    const src = '$п areas = [\n  ["Группы", "пол"]\n]';
+    const msgs = compile(src).diagnostics.filter((d) => d.severity === "error").map((d) => d.message);
+    expect(msgs.length).toBeGreaterThanOrEqual(1);
+    expect(msgs.some((m) => m.includes("cannot contain spaces") && m.includes("$пareas"))).toBe(true);
+  });
+});

@@ -118,9 +118,16 @@ class Parser {
     }
     const next = this.peek();
     if (next.t !== "sep" && next.t !== "eof") {
+      // The classic slip behind this shape: a space inside a state name —
+      // `$п areas = […]` reads as the bare state `$п` (a root expression)
+      // followed by the identifier `areas`.
+      const spaceHint =
+        statement.kind === "root" && statement.value.type === "state" && next.t === "ident"
+          ? ` State names cannot contain spaces: this reads as state \`$${statement.value.name}\` followed by \`${next.value}\`; write the whole name without spaces, as in \`$${statement.value.name}${next.value}\`.`
+          : "";
       throw new ParseError(
         next,
-        `expected a new line or \`;\` after the statement, found ${describe(next)}; wrap multi-line expressions in brackets`,
+        `expected a new line or \`;\` after the statement, found ${describe(next)}.${spaceHint} Wrap multi-line expressions in brackets`,
       );
     }
     return statement;

@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { useBbNavigate } from "@get-bb/plugin-sdk/app";
-import { collectLoads, dataKey, evaluate, imageSearches, initialState, toMarkdownWithImages, wikiPhotos, type LoadedData, type Program } from "../core";
+import { collectLoads, dataKey, evaluate, formatDiagnostics, imageSearches, initialState, toMarkdownWithImages, wikiPhotos, type LoadedData, type Program } from "../core";
 import { answersText } from "../core/answers";
 import type { Action, Diagnostic, Value } from "../core/types";
 import { GALLERY_SHEET, sheetFor, useBlockAnswers, type Selection } from "./answerSheet";
@@ -394,10 +394,13 @@ export function RenderFailure({
   source,
   diagnostics,
   gallery,
+  fixRequest,
 }: {
   source: string;
   diagnostics: readonly Diagnostic[];
   gallery?: GalleryExample;
+  /** In a thread: the staged fix-request button (ui/FixRequestButton.tsx); the gallery has no thread to write into. */
+  fixRequest?: ReactNode;
 }) {
   return (
     <Frame source={source} diagnostics={diagnostics} gallery={gallery}>
@@ -407,6 +410,7 @@ export function RenderFailure({
       >
         <p className="mb-1.5 font-medium text-destructive">This UI couldn't be rendered</p>
         <DiagnosticList diagnostics={diagnostics} />
+        {fixRequest}
       </div>
     </Frame>
   );
