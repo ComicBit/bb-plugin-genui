@@ -14,6 +14,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - `Tabs` given as one list of `{title, children}` tab cards instead of the parallel `labels` and `children` lists now splits into those two lists with a warning, instead of failing with `is missing children`.
 - An input bound to a state that is never declared — `Input($addr, …)` with no `$addr = …` anywhere, or the bare `Input(addr, …)` spelling — now declares it with the kind's neutral initial (`""`, `[]`, `0`) and a warning, instead of failing the block with `unknown state`.
 - Arguments packed into one JS-style config object — `Table({columns: […], rows: […]})` — used to fail (`is missing rows`, `columns needs a list, got an object`). When the call is a single `{…}` whose every key is a parameter name and the call would otherwise fail, the keys now become named arguments (`Table(columns: […], rows: […])`) with a warning. Data-shaped objects (`KeyValue`'s map, `Json`'s value) are never touched, and any unknown key keeps the block's errors.
+- **State and value names work in any language.** `$имя = "привет"` used to fail with `expected a state name`; identifiers now accept Unicode letters (`$счёт`, `сумма = (a, b) => …`).
+- `Board` takes an optional `label` for its heading, and a heading typed into `columns` — `Board(items, "Задачи")` — moves there with a warning instead of failing (`columns needs a list, got text`).
+- `Button("A", detail: …)` has no `detail` and its error now says where descriptions belong: `OptionCards` ({value, title?, detail?}) or `List` ({title, detail}).
 
 ## [0.3.1] - 2026-10-22
 
