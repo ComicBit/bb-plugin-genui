@@ -1,4 +1,4 @@
-import type { CallExpr, Decl, Expr, Program, Statement } from "./ast";
+import type { CallExpr, Decl, Expr, NamedArg, Program, Statement } from "./ast";
 import {
   ACTIONS,
   COMPONENTS,
@@ -574,6 +574,7 @@ class Validator {
     }
     this.coerceOptionsFirst(expr, spec, slots, sig);
     this.coerceTabsItems(expr, spec, slots, sig);
+    this.coerceConfigObject(expr, spec, slots, sig);
     this.coerceUndeclaredBindings(expr, spec, slots, sig);
     spec.params.forEach((param, index) => {
       const slot = slots[index];
@@ -652,6 +653,48 @@ class Validator {
     this.diagnostics.report(
       expr.pos,
       `\`${expr.name}\` got its tabs as one list of {title, children}; split them into parallel labels and children: ${sig}`,
+      "warning",
+    );
+  }
+
+  /**
+   * The config-object slip: `Table({columns: […], rows: […]})` — the model
+   * packs the arguments into one JS-style props object instead of positional
+   * or named arguments. When the call is a single object argument and every
+   * key of that object is a parameter name, the entries become named
+   * arguments (warning). Only fires when the call would otherwise fail — a
+   * required parameter missing or the object landing on a typed parameter it
+   * does not fit — so data-shaped objects (KeyValue's map, Json's value) are
+   * never touched; and any unknown key keeps the block's errors, since the
+   * intent would no longer be clear.
+   */
+  private coerceConfigObject(expr: CallExpr, spec: ComponentSpec, slots: (Expr | undefined)[], sig: string): void {
+    if (expr.args.length !== 1 || expr.named.length > 0) return;
+    const obj = slots[0];
+    if (obj === undefined || obj.type !== "object" || obj.entries.length === 0) return;
+    const landing = spec.params[0];
+    const wanted = landing === undefined ? undefined : LITERAL_KINDS[landing.kind];
+    const missingRequired = spec.params.some((param, index) => !param.optional && index > 0 && slots[index] === undefined);
+    const misplaced = wanted !== undefined && wanted !== "object" && !(landing.optional && obj.entries.every((entry) => entry.value.type === "literal" && entry.value.value === null));
+    if (!missingRequired && !misplaced) return;
+    const named: NamedArg[] = [];
+    for (const entry of obj.entries) {
+      const param = spec.params.find((candidate) => candidate.name === entry.key);
+      if (param === undefined || slots.some((slot, index) => index > 0 && slot !== undefined && spec.params[index].name === entry.key)) return;
+      named.push({ name: entry.key, value: entry.value, pos: entry.pos });
+    }
+    slots.fill(undefined);
+    for (const arg of named) {
+      const index = spec.params.findIndex((param) => param.name === arg.name);
+      slots[index] = arg.value;
+    }
+    // validate owns the parsed AST before it becomes the program (readonly is type-level).
+    const mutable = expr as unknown as { args: Expr[]; named: NamedArg[] };
+    mutable.args = [];
+    mutable.named = named;
+    this.diagnostics.report(
+      expr.pos,
+      `\`${expr.name}\` got its arguments as one {...} object; the keys became named arguments (write them as \`name: value\` next time): ${sig}`,
       "warning",
     );
   }
