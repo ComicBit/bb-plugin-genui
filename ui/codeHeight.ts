@@ -25,21 +25,30 @@ export class CodeHeights {
     return true;
   }
 
+  /** The height already drawn for this exact length, before applying the body's current CSS cap. */
+  recordedHeight(lines: number): number | null {
+    return this.heights.get(lines) ?? null;
+  }
+
   /**
    * The height `lines` lines take in a body capped at `cap` px: as drawn
    * before, or on the line through the two nearest lengths drawn below the
-   * cap. Null until two lengths are known.
+   * cap. Null for unseen lengths until two lengths are known. A cap reader is only called when
+   * an exact height or enough samples exist.
    */
-  predict(lines: number, cap: number): number | null {
+  predict(lines: number, cap: number | (() => number)): number | null {
     const drawn = this.heights.get(lines);
-    if (drawn !== undefined) return Math.min(cap, drawn);
+    // Reading the body's CSS cap can flush layout; an empty prediction needs no measurement.
+    if (drawn === undefined && this.heights.size < 2) return null;
+    const maximum = typeof cap === "number" ? cap : cap();
+    if (drawn !== undefined) return Math.min(maximum, drawn);
     const [near, next] = [...this.heights]
-      .filter(([, height]) => height < cap)
+      .filter(([, height]) => height < maximum)
       .sort(([a], [b]) => Math.abs(a - lines) - Math.abs(b - lines));
     if (next === undefined) return null;
     const perLine = (next[1] - near[1]) / (next[0] - near[0]);
     if (!(perLine > 0)) return null;
-    return Math.min(cap, Math.round(near[1] + perLine * (lines - near[0])));
+    return Math.min(maximum, Math.round(near[1] + perLine * (lines - near[0])));
   }
 
   serialize(): string {
@@ -96,8 +105,11 @@ export function useCodeHeight(body: RefObject<HTMLDivElement | null>, lines: num
       box.style.height = "";
       box.style.overflow = "";
     };
-    const cap = Number.parseFloat(getComputedStyle(box).maxHeight);
-    const expected = loading() ? store.predict(lines, Number.isFinite(cap) ? cap : Number.POSITIVE_INFINITY) : null;
+    // CSS clamps an exact stored height by max-height itself; only interpolation needs to read the cap.
+    const expected = loading() ? store.recordedHeight(lines) ?? store.predict(lines, () => {
+      const cap = Number.parseFloat(getComputedStyle(box).maxHeight);
+      return Number.isFinite(cap) ? cap : Number.POSITIVE_INFINITY;
+    }) : null;
     if (expected !== null) {
       box.style.height = `${expected}px`;
       box.style.overflow = "hidden";
@@ -107,9 +119,12 @@ export function useCodeHeight(body: RefObject<HTMLDivElement | null>, lines: num
       if (!loading()) release();
     });
     // Only the viewer's own drawing (its diffs-container) teaches the height; a hidden tab measures 0.
-    const drawn = new ResizeObserver(() => {
+    const drawn = new ResizeObserver(([entry]) => {
       if (box.style.height !== "" || loading() || box.querySelector("diffs-container") === null) return;
-      if (!store.record(lines, box.offsetHeight)) return;
+      // The observer already measured this unpadded body; don't force another layout read.
+      const { borderBoxSize, contentRect } = entry!;
+      const height = borderBoxSize?.[0]?.blockSize ?? contentRect.height;
+      if (!store.record(lines, height)) return;
       persistTimer ??= window.setTimeout(() => {
         persistTimer = undefined;
         try {
