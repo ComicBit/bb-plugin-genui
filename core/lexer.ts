@@ -40,8 +40,10 @@ const CONTINUES_BEFORE: Record<string, true> = {
 };
 
 const NUMBER = /\d(?:_?\d)*(?:\.\d(?:_?\d)*)?(?:[eE][+-]?\d+)?/y;
-const IDENT = /[A-Za-z_][A-Za-z0-9_]*/y;
-const IDENT_CHAR = /[A-Za-z0-9_]/;
+// Letters, digits and underscore per Unicode: state and value names may be
+// written in any language ("$имя", "сумма = (a, b) => …"), not just ASCII.
+const IDENT = /[\p{L}_][\p{L}\p{Nd}_]*/yu;
+const IDENT_CHAR = /[\p{L}\p{Nd}_]/u;
 const HEX = /^[0-9a-fA-F]+$/;
 
 const ESCAPES: Record<string, string> = {

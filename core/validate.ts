@@ -60,6 +60,12 @@ const STYLE_ARGS: Record<string, true> = {
   margin: true, width: true, height: true, style: true, classname: true, class: true, shadow: true, radius: true,
 };
 
+/**
+ * Named args that describe an option row (lowercased). Components with a
+ * label-only parameter (Button) get pointed at the ones with a description.
+ */
+const DESCRIPTION_KEYS: Record<string, true> = { detail: true, description: true, subtitle: true, note: true };
+
 /** The type of a value, as named in diagnostics. */
 export type Kind = "null" | "boolean" | "number" | "string" | "list" | "object" | "node" | "action" | "binding" | "function";
 
@@ -564,7 +570,9 @@ class Validator {
         const why =
           hint === "" && Object.hasOwn(STYLE_ARGS, arg.name.toLowerCase())
             ? ` Components draw in BB's theme and take no style arguments${spec.params.some((param) => param.name === "tone") ? "; use `tone:` (good, warn, bad, info) for a status colour" : ""}.`
-            : hint;
+            : hint === "" && Object.hasOwn(DESCRIPTION_KEYS, arg.name.toLowerCase())
+              ? ` For an option with a description, use ` + '`OptionCards`' + ` ({value, title?, detail?}) or List ({title, detail}).`
+              : hint;
         this.diagnostics.report(arg.pos, `\`${expr.name}\` has no parameter \`${arg.name}\`.${why} ${sig}`);
       } else if (slots[index] !== undefined) {
         this.diagnostics.report(arg.pos, `\`${arg.name}\` is given twice: ${sig}`);
@@ -576,6 +584,7 @@ class Validator {
     this.coerceTabsItems(expr, spec, slots, sig);
     this.coerceConfigObject(expr, spec, slots, sig);
     this.coerceUndeclaredBindings(expr, spec, slots, sig);
+    this.coerceHeadingToLabel(expr, spec, slots, sig);
     spec.params.forEach((param, index) => {
       const slot = slots[index];
       if (slot === undefined) {
@@ -760,6 +769,35 @@ class Validator {
     const decl: Decl = { name, value, pos };
     this.states.set(name, { index: this.stateDecls.length, decl });
     this.stateDecls.push(decl);
+  }
+
+  /**
+   * A heading typed into an optional list parameter: `Board(items, "Задачи")`
+   * — the second positional argument lands on `columns`, which needs a list.
+   * A string can never be that list, and a component that takes an optional
+   * string `label` beside it clearly wanted the text as its heading: the
+   * string moves to `label` (named) with a warning. Only fires when the
+   * string would otherwise fail the kind check, and only for the exact
+   * shape `columns` (list, optional) + `label` (string, optional, empty).
+   */
+  private coerceHeadingToLabel(expr: CallExpr, spec: ComponentSpec, slots: (Expr | undefined)[], sig: string): void {
+    const listIndex = spec.params.findIndex((param) => param.name === "columns" && param.kind === "list" && param.optional);
+    const labelIndex = spec.params.findIndex((param) => param.name === "label" && param.kind === "string" && param.optional);
+    if (listIndex < 0 || labelIndex < 0 || slots[listIndex] === undefined || slots[labelIndex] !== undefined) return;
+    const slot = slots[listIndex];
+    if (slot === undefined || slot.type !== "literal" || typeof slot.value !== "string") return;
+    slots[listIndex] = undefined;
+    slots[labelIndex] = slot;
+    if (expr.args[listIndex] === slot) {
+      const args = (expr as unknown as { args: Expr[] }).args;
+      args.splice(listIndex, 1);
+      (expr as unknown as { named: NamedArg[] }).named.push({ name: "label", value: slot, pos: slot.pos });
+    }
+    this.diagnostics.report(
+      slot.pos,
+      `\`${expr.name}\` got its heading in the \`columns\` argument, which needs a list; moved it to \`label\`: ${sig}`,
+      "warning",
+    );
   }
 
   private checkParam(owner: string, param: ParamSpec, slot: Expr): void {
