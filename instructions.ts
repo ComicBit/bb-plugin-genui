@@ -42,6 +42,7 @@ export const REFERENCE_MORE_GROUPS: readonly ComponentGroup[] = ["Inputs", "Widg
 export const UI_REFERENCE = `# Inline UI reference
 The \`\`\`ui language used by the Inline UI section below.
 Syntax: one statement per line. \`$x = 8\` is state inputs bind to; \`name = expr\` names a value and \`f = (a, b) => expr\` a function; each bare expression renders. JS expressions incl. ** ?: ?? \`\${x}\` [lists] {objects} x.y map/filter/find/join/length, plus round(x, d), fmt(x, d), sum, min, max, abs, entries, Load(path), sqrt floor ceil clamp range(a, b, step?). Named args go last: Slider($n, 0, 10, label: "N").
+A tag in markdown (<Sources … />) shows as raw text; components go inside a \`\`\`ui block.
 Components (? optional; tone: neutral|good|warn|bad|info if meaningful; more in the next section):
 ${componentLines(REFERENCE_GROUPS)}
 Actions: ${actionList}; a list runs in order; a picked Send puts its text in the user's message.

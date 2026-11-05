@@ -4,6 +4,21 @@ What changed in each version of the Generative UI plugin for BB. Update an insta
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- A ```` ```ui ```` or ```` ```app ```` block no longer dies on a backslash. Unknown escapes such as `\S` in a regex, `\U` or `\S` in a Windows path, or `\Delta` in LaTeX text used to fail the whole block with `error: unknown escape` ("This UI couldn't be rendered"); they now stay as literal text with a warning. Documented escapes (`\n`, `\t`, `\r`, `\\`, `\"`, `\'`, `` \` ``, `\$`, `\u{hex}`, `\uXXXX`) decode as before, and an escaped quote or backtick still swallows the closer exactly like JavaScript.
+- A component tag an agent typed straight into markdown, outside any ```` ```ui ```` block — the classic `<Sources links={[…]} />` trailing a reply — used to sit there as raw text. A thread-scoped scan now recognizes a single self-closing tag naming a catalog component, rewrites it as the equivalent spec statement, and renders it with the same chrome as a real ```` ```ui ```` block (including its Source panel). A tag that does not parse or compile stays as the raw text, and the agent-facing reference now says to write components only inside a fence.
+- `Checklist(options)` — the options list given as the only argument, with the `$state` for the picks left out — used to fail the block twice (`is missing options` + `value must be a state variable`). The same shape across `Choice`, `Radio`, `Select` and `OptionCards` is now rewritten around a fresh state (`Checklist($checklist, […])`) with a warning, and the Source panel shows the corrected call. Anything ambiguous (a second positional argument, a non-list value) keeps its errors.
+- `Tabs` given as one list of `{title, children}` tab cards instead of the parallel `labels` and `children` lists now splits into those two lists with a warning, instead of failing with `is missing children`.
+- An input bound to a state that is never declared — `Input($addr, …)` with no `$addr = …` anywhere, or the bare `Input(addr, …)` spelling — now declares it with the kind's neutral initial (`""`, `[]`, `0`) and a warning, instead of failing the block with `unknown state`.
+- Arguments packed into one JS-style config object — `Table({columns: […], rows: […]})` — used to fail (`is missing rows`, `columns needs a list, got an object`). When the call is a single `{…}` whose every key is a parameter name and the call would otherwise fail, the keys now become named arguments (`Table(columns: […], rows: […])`) with a warning. Data-shaped objects (`KeyValue`'s map, `Json`'s value) are never touched, and any unknown key keeps the block's errors.
+- **State and value names work in any language.** `$имя = "привет"` used to fail with `expected a state name`; identifiers now accept Unicode letters (`$счёт`, `сумма = (a, b) => …`).
+- `Board` takes an optional `label` for its heading, and a heading typed into `columns` — `Board(items, "Задачи")` — moves there with a warning instead of failing (`columns needs a list, got text`).
+- `Button("A", detail: …)` has no `detail` and its error now says where descriptions belong: `OptionCards` ({value, title?, detail?}) or `List` ({title, detail}).
+- **Keyed columns**: `Table({place: "№", model: "Модель"}, [[{place: 1, tone: "good"}, …]])` — a header map plus cells keyed to their column — is now flattened into the parallel `columns` + `rows` lists with a warning (per-cell `tone` is not supported by `Table` and is left out). Only fires when every header value is text, every row matches the header count, and every keyed cell carries exactly one column key.
+
 ## [0.3.1] - 2026-10-22
 
 ### Fixed
