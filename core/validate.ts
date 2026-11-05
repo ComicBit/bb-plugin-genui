@@ -582,6 +582,7 @@ class Validator {
     }
     this.coerceOptionsFirst(expr, spec, slots, sig);
     this.coerceTabsItems(expr, spec, slots, sig);
+    this.coerceKeyedColumns(expr, spec, slots);
     this.coerceConfigObject(expr, spec, slots, sig);
     this.coerceUndeclaredBindings(expr, spec, slots, sig);
     this.coerceHeadingToLabel(expr, spec, slots, sig);
@@ -666,6 +667,67 @@ class Validator {
     this.diagnostics.report(
       expr.pos,
       `\`${expr.name}\` got its tabs as one list of {title, children}; split them into parallel labels and children: ${sig}`,
+      "warning",
+    );
+  }
+
+  /**
+   * Keyed columns: `Table({place: "№", model: "Модель"}, [[{place: 1, tone:
+   * "good"}, {model: "X"}, …], …])` — the model names the columns with an
+   * object and keys every cell to its column instead of the parallel
+   * `columns` + `rows` lists. The intent is unambiguous when every header
+   * value is a text literal and every row is a list of the same length whose
+   * cells are scalars (position-aligned) or objects carrying exactly one
+   * column key plus optional style keys (`tone`, which Table cells do not
+   * support and which are left out): the call is flattened into the two lists
+   * with a warning. Anything else keeps its errors.
+   */
+  private coerceKeyedColumns(expr: CallExpr, spec: ComponentSpec, slots: (Expr | undefined)[]): void {
+    if (expr.name !== "Table" || expr.args.length !== 2 || expr.named.length > 0) return;
+    const columns = spec.params[0];
+    const rows = spec.params[1];
+    if (columns?.name !== "columns" || columns.kind !== "list" || columns.optional) return;
+    if (rows?.name !== "rows" || rows.kind !== "list" || rows.optional) return;
+    const headers = slots[0];
+    const rowsList = slots[1];
+    if (headers === undefined || headers.type !== "object" || headers.entries.length === 0) return;
+    if (rowsList === undefined || rowsList.type !== "list") return;
+    const keys = headers.entries.map((entry) => {
+      if (entry.value.type !== "literal" || typeof entry.value.value !== "string") return null;
+      return { key: entry.key, header: entry.value };
+    });
+    if (keys.some((key) => key === null)) return;
+    const keySet = new Set(keys.map((key) => key!.key));
+    if (keySet.size !== keys.length) return;
+    const cellRows: Expr[][] = [];
+    for (const row of rowsList.items) {
+      if (row.type !== "list" || row.items.length !== keys.length) return;
+      const cells: Expr[] = [];
+      for (const cell of row.items) {
+        if (cell.type !== "object") {
+          cells.push(cell);
+          continue;
+        }
+        const data = cell.entries.filter((entry) => keySet.has(entry.key));
+        const styled = cell.entries.filter((entry) => !keySet.has(entry.key));
+        if (data.length !== 1 || styled.some((entry) => entry.key !== "tone")) return;
+        cells.push(data[0]!.value);
+      }
+      cellRows.push(cells);
+    }
+    const columnsList: Expr = { type: "list", items: keys.map((key) => key!.header), pos: headers.pos };
+    const rowsValue: Expr = {
+      type: "list",
+      items: cellRows.map((cells) => ({ type: "list", items: cells, pos: rowsList!.pos })),
+      pos: rowsList!.pos,
+    };
+    slots[0] = columnsList;
+    slots[1] = rowsValue;
+    // validate owns the parsed AST before it becomes the program (readonly is type-level).
+    (expr as unknown as { args: Expr[] }).args = [columnsList, rowsValue];
+    this.diagnostics.report(
+      expr.pos,
+      `\`${expr.name}\` got keyed columns and keyed cells; flattened them into columns and rows (cell styling like \`tone\` is not supported and was left out): ${signature(expr.name, spec)}`,
       "warning",
     );
   }
