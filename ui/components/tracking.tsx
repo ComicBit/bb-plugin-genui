@@ -39,7 +39,7 @@ import {
 } from "../../core/tracking";
 import { CardDepthContext, useUiRuntime } from "../runtime";
 import { usePersistedState, propsKey } from "../usePersistedState";
-import { formatNumber, TONE_DOT, TONE_PILL, TONE_TEXT, type Props, type Tone } from "../values";
+import { formatNumber, text, TONE_DOT, TONE_PILL, TONE_TEXT, type Props, type Tone } from "../values";
 import { actionIntent } from "./action-logic";
 import { CHAR_WIDTH, useWidth } from "./chartKit";
 import { ErrorLine } from "./display";
@@ -484,6 +484,7 @@ export function Board({ props }: { props: Props }) {
   const [view, setView] = usePersistedState<BoardView>(`${key}:board`, BOARD_VIEW, acceptBoardView);
   if (!read.ok) return <ErrorLine message={read.error} />;
   const board = read.value;
+  const heading = props.label === undefined ? SOURCE_TITLE[board.source] : text(props.label);
   const [one, many] = SOURCE_NOUN[board.source];
   const late = board.columns.reduce((sum, column) => sum + column.cards.filter((card) => cardLate(card, today)).length, 0);
   const working = board.columns.reduce((sum, column) => sum + column.cards.filter((card) => card.agents > 0).length, 0);
@@ -500,7 +501,7 @@ export function Board({ props }: { props: Props }) {
   if (board.columns.length === 0) {
     return (
       <Frame label={SOURCE_TITLE[board.source]}>
-        <Heading title={SOURCE_TITLE[board.source]} meta={null} />
+        <Heading title={heading} meta={null} />
         <QuietLine>{board.skipped > 0 ? `No item has a title (${formatNumber(board.skipped)} left out).` : `No ${many}.`}</QuietLine>
       </Frame>
     );
@@ -519,7 +520,7 @@ export function Board({ props }: { props: Props }) {
 
   return (
     <Frame label={SOURCE_TITLE[board.source]}>
-      <Heading title={SOURCE_TITLE[board.source]} meta={metaLine} />
+      <Heading title={heading} meta={metaLine} />
       {/* Narrow: one column at a time, picked here. Wide: every column side by side, this strip hidden. */}
       <div
         ref={strip}

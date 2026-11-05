@@ -572,8 +572,12 @@ export const COMPONENTS = {
   // Manage: planning and tracking, plus BB's own environments.
   Board: {
     group: "Manage",
-    params: [{ name: "items", kind: "any" }, { name: "columns", kind: "list", optional: true }],
-    summary: "kanban: [{title, status, …}] or a Load()ed task/issue list",
+    params: [
+      { name: "items", kind: "any" },
+      { name: "columns", kind: "list", optional: true },
+      { name: "label", kind: "string", optional: true },
+    ],
+    summary: "kanban: [{title, status, …}] or a Load()ed task/issue list; label: the board's heading",
   },
   Roadmap: {
     group: "Manage",
