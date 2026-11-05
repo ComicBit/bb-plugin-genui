@@ -17,6 +17,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - **State and value names work in any language.** `$имя = "привет"` used to fail with `expected a state name`; identifiers now accept Unicode letters (`$счёт`, `сумма = (a, b) => …`).
 - `Board` takes an optional `label` for its heading, and a heading typed into `columns` — `Board(items, "Задачи")` — moves there with a warning instead of failing (`columns needs a list, got text`).
 - `Button("A", detail: …)` has no `detail` and its error now says where descriptions belong: `OptionCards` ({value, title?, detail?}) or `List` ({title, detail}).
+- **Keyed columns**: `Table({place: "№", model: "Модель"}, [[{place: 1, tone: "good"}, …]])` — a header map plus cells keyed to their column — is now flattened into the parallel `columns` + `rows` lists with a warning (per-cell `tone` is not supported by `Table` and is left out). Only fires when every header value is text, every row matches the header count, and every keyed cell carries exactly one column key.
 
 ## [0.3.1] - 2026-10-22
 
