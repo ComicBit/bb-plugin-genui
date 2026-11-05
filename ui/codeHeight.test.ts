@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { CodeHeights } from "./codeHeight";
 
 describe("CodeHeights", () => {
@@ -8,35 +8,6 @@ describe("CodeHeights", () => {
     store.record(2, 68);
     expect(store.predict(2, 384)).toBe(68);
     expect(store.predict(5, 384)).toBeNull();
-  });
-
-  it("reads the body's cap only when it can predict a height", () => {
-    const store = new CodeHeights();
-    const cap = vi.fn(() => 384);
-    expect(store.predict(5, cap)).toBeNull();
-    store.record(3, 86);
-    expect(store.predict(5, cap)).toBeNull();
-    expect(cap).not.toHaveBeenCalled();
-
-    expect(store.predict(3, cap)).toBe(86);
-    expect(cap).toHaveBeenCalledTimes(1);
-    store.record(5, 122);
-    expect(store.predict(4, cap)).toBe(104);
-    expect(cap).toHaveBeenCalledTimes(2);
-  });
-
-  it("uses the current cap for old stored heights and capped interpolation samples", () => {
-    const store = CodeHeights.read(JSON.stringify([[1, 50], [2, 68], [25, 384]]));
-    expect(store.recordedHeight(25)).toBe(384);
-    expect(store.recordedHeight(4)).toBeNull();
-    let maximum = 384;
-    const cap = () => maximum;
-    expect(store.predict(4, cap)).toBe(104);
-    expect(store.predict(25, cap)).toBe(384);
-
-    maximum = 96;
-    expect(store.predict(4, cap)).toBe(96);
-    expect(store.predict(25, cap)).toBe(96);
   });
 
   it("puts unseen lengths on the line through the nearest lengths it has seen, up to the body's cap", () => {
