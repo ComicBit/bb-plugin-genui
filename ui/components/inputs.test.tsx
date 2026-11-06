@@ -241,4 +241,17 @@ describe("FollowUps", () => {
     expect(face(row)).toBe("How do I deploy this? [Sent]");
     expect(hintOnFocus(row)).toBe("Add to your message");
   });
+
+  it("pick several prompts at once; each tap toggles only its own row", async () => {
+    render(<FollowUps props={{ prompts: ["One", "Two", "Three"] }} />);
+    const rows = () => [...container.querySelectorAll("button")];
+    const pressed = () => rows().map((row) => row.getAttribute("aria-pressed"));
+    await act(async () => rows()[2]!.click());
+    await act(async () => rows()[0]!.click());
+    expect(pressed()).toEqual(["true", "false", "true"]);
+    await act(async () => rows()[2]!.click());
+    expect(pressed()).toEqual(["true", "false", "false"]);
+    await act(async () => rows()[0]!.click());
+    expect(pressed()).toEqual(["false", "false", "false"]);
+  });
 });

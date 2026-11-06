@@ -475,7 +475,7 @@ export const COMPONENTS = {
   FollowUps: {
     group: "Inputs",
     params: [{ name: "prompts", kind: "list" }],
-    summary: "suggested next questions; a tap picks one",
+    summary: "suggested next questions; each tap picks or unpicks one, several may be picked",
   },
   Walkthrough: {
     group: "Widgets",
