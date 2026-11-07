@@ -384,19 +384,26 @@ function SwatchChip({
 
 /**
  * Suggested next questions as quiet rows, and one question: a tap puts the
- * prompt in the user's message (single-select: tap again to take it out,
- * another to switch). Like a ButtonGroup's choices, they fold away once sent
- * (leaving a "sent" line) or once the thread moved on.
+ * prompt in the user's message (multi-select: each tap toggles that prompt;
+ * the picked ones go in as one line each, in the listed order). Like a
+ * ButtonGroup's choices, they fold away once sent (leaving a "sent" line) or
+ * once the thread moved on.
  */
 export function FollowUps({ props }: { props: Props }) {
   const { staged, sent, target, stage } = useAnswers();
   const question = useContext(NodeKeyContext);
   const { closed, gone } = useClosedChoices(question);
   const prompts = followUpPrompts(props.prompts);
-  const answered = sentFor(sent, question, (text) => prompts.includes(text));
+  const answered = sentFor(sent, question, (text) => text.split("\n").every((line) => prompts.includes(line)));
   if (gone) return answered === null ? null : <SentLine text={answered.text} />;
   if (prompts.length === 0) return null;
-  const picked = staged.get(question)?.selection ?? null;
+  const selection = staged.get(question)?.selection;
+  const picked = new Set(typeof selection === "string" && selection !== "" ? selection.split("\n") : []);
+  const toggle = (prompt: string) => {
+    const next = prompts.filter((p) => (p === prompt ? !picked.has(p) : picked.has(p)));
+    const joined = next.join("\n");
+    void stage(question, next.length === 0 ? null : { text: joined, selection: joined });
+  };
   return (
     <div data-genui-question={question} className="flex min-w-0 flex-col gap-2">
       <ul
@@ -411,13 +418,13 @@ export function FollowUps({ props }: { props: Props }) {
           <FollowUpRow
             key={prompt}
             prompt={prompt}
-            pressed={picked === prompt}
-            effect={sendEffect(target, !closed, picked === prompt)}
-            onPick={() => void stage(question, picked === prompt ? null : { text: prompt, selection: prompt })}
+            pressed={picked.has(prompt)}
+            effect={sendEffect(target, !closed, picked.has(prompt))}
+            onPick={() => toggle(prompt)}
           />
         ))}
       </ul>
-      {picked !== null && !closed ? <InMessageLine /> : null}
+      {picked.size > 0 && !closed ? <InMessageLine /> : null}
     </div>
   );
 }
