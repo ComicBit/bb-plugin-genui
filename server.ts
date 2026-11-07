@@ -241,7 +241,7 @@ export default async function plugin(bb: BbPluginApi) {
   bb.agents.registerTool({
     name: "check_ui",
     description:
-      "Checks a ```ui block before you put it in your reply: compile errors, files Load or Snippet can't read, wrong line ranges, errors its inputs cause once used (each slider end, toggle, option, emptied list), and the text version of what the user will see. Optional; use it for blocks with Load, Snippet or inputs. With language \"app\" it checks a ```app page instead: script syntax, network use, dialogs, genui calls outside a handler.",
+      "Checks a ```ui block before you put it in your reply: compile errors, files Load or Snippet can't read, inaccessible local images (Image, Gallery, Compare, Hotspots and Entity), wrong line ranges, errors its inputs cause once used (each slider end, toggle, option, emptied list), and the text version of what the user will see. Local images must be in this thread's workspace, $BB_THREAD_STORAGE or /tmp; copy external tool screenshots there first. Optional; use it for blocks with files, images or inputs. With language \"app\" it checks a ```app page instead: script syntax, network use, dialogs, genui calls outside a handler.",
     instructions: UI_REFERENCE,
     parameters: z.object({
       // A ```ui spec has its own, smaller cap, which compile reports.
@@ -258,6 +258,7 @@ export default async function plugin(bb: BbPluginApi) {
               (request) => loadThreadFile(bb, ctx.threadId, request.path, request),
               findImage,
               projectReader(project, environments, ctx.threadId),
+              (src) => loadThreadImage(bb, ctx.threadId, src),
             );
       return { content: [{ type: "text", text: report }], isError: !ok };
     },
