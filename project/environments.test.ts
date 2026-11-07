@@ -141,9 +141,11 @@ function fakeBb(options: { status?: (environmentId: string, base: string | undef
         const branch = environments[args.environmentId]?.branchName ?? "main";
         return { outcome: "available", workspace: workspace(branch) };
       },
-      pullRequest: async (args: { environmentId: string }) => {
-        calls.push({ method: "environments.pullRequest", args });
-        return { outcome: "available", pullRequest: PULL_REQUEST };
+    },
+    plugins: {
+      callRpc: async (args: { input: { keys: string[] }; outputSchema: { parse: (raw: unknown) => unknown } }) => {
+        calls.push({ method: "plugins.callRpc", args });
+        return args.outputSchema.parse({ [args.input.keys[0]]: { outcome: "available", pullRequest: PULL_REQUEST } });
       },
     },
   };
@@ -255,7 +257,7 @@ describe("environments: one environment's detail", () => {
     const detail = (await source.environment("thr_mine00", "env_main")) as EnvironmentDetail;
     expect(detail.checkout).toMatchObject({ ok: true, onBase: true, ahead: null, behind: null });
     expect(detail.pull).toBeNull();
-    expect(calls.some((call) => call.method === "environments.pullRequest")).toBe(false);
+    expect(calls.some((call) => call.method === "plugins.callRpc")).toBe(false);
   });
 
   it("says a missing workspace folder honestly", async () => {
@@ -297,8 +299,8 @@ function fakeBbWithoutBase() {
         calls.push({ method: "environments.status", args });
         return { outcome: "available", workspace: workspace("wt/env_wt01") };
       },
-      pullRequest: async () => ({ outcome: "absent" }),
     },
+    plugins: { callRpc: async (args: { outputSchema: { parse: (raw: unknown) => unknown } }) => args.outputSchema.parse({ env_wt01: { outcome: "absent" } }) },
   };
   return { source: createEnvironmentsSource(sdk as unknown as BbPluginApi["sdk"]), calls };
 }
