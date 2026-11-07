@@ -173,6 +173,42 @@ async function gpuProblems(roots: readonly UiNode[], load: Loader): Promise<stri
   return [...problems];
 }
 
+/** Uses the renderer's image loader so preflight observes the same roots, types and byte limit. */
+async function imageProblems(
+  roots: readonly UiNode[],
+  read: ((src: string) => Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }>) | undefined,
+): Promise<string[]> {
+  if (read === undefined) return [];
+  const paths = new Set<string>();
+  const add = (value: Value | undefined) => {
+    if (typeof value === "string" && value.trim() !== "" && !/^https:\/\//i.test(value.trim())) paths.add(value.trim());
+  };
+  const visit = (value: Value | readonly UiNode[]) => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+    } else if (typeof value === "object" && value !== null && "kind" in value && value.kind === "node") {
+      const node = value as UiNode;
+      if (node.type === "Image") add(node.props.src);
+      if (node.type === "Hotspots" || node.type === "Entity") add(node.props.image);
+      if (node.type === "Gallery" || node.type === "Compare") {
+        const images = node.props.images;
+        if (Array.isArray(images)) {
+          for (const image of images) {
+            if (typeof image === "string") add(image);
+            else if (typeof image === "object" && image !== null && !Array.isArray(image)) add(image.src);
+          }
+        }
+      }
+      for (const prop of Object.values(node.props)) visit(prop);
+    }
+  };
+  visit(roots);
+  return (await Promise.all([...paths].map(async (src) => {
+    const result = await read(src);
+    return result.ok ? [] : [`${src}: ${result.error}. Copy the image into this thread's workspace, $BB_THREAD_STORAGE or /tmp and use that path.`];
+  }))).flat();
+}
+
 /**
  * What the check_ui tool tells the agent about one ```ui block: why it fails
  * to compile, which files Load and Snippet can't read, evaluation errors, the
@@ -185,6 +221,7 @@ export async function checkSpec(
   load: Loader,
   find?: ImageFinder,
   project?: ProjectReader,
+  image?: (src: string) => Promise<{ readonly ok: true } | { readonly ok: false; readonly error: string }>,
 ): Promise<{ readonly ok: boolean; readonly report: string }> {
   const compiled = compile(spec);
   if (compiled.program === null) {
@@ -201,6 +238,7 @@ export async function checkSpec(
     ...loaded.flatMap(([request, result]) => (result.ok ? [] : [`${request.path}: ${result.error}`])),
     ...(diagnostics.length > 0 ? [formatDiagnostics(diagnostics)] : []),
     ...(await gpuProblems(roots, load)),
+    ...(await imageProblems(roots, image)),
     ...probed.failures.map(({ probe, diagnostics }) => `After ${probe.describe}:\n${formatDiagnostics(diagnostics)}`),
   ];
   const tried = probed.tried === 0 ? "" : ` Tried ${probed.tried} interaction${probed.tried === 1 ? "" : "s"}.`;
