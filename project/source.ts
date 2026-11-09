@@ -4,6 +4,7 @@
 // environment; Threads lists only threads of that thread's project, and any
 // other id is "not found". Environments has its own source (environments.ts).
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import { z } from "zod";
 import {
   matchesPathFilter,
   RUNNING,
@@ -139,26 +140,64 @@ export function changedFile(file: DiffFileEntry, inline: boolean): ChangedFile {
   };
 }
 
-interface PullRequestEntry {
-  readonly number: number;
-  readonly title: string;
-  readonly url: string;
-  readonly state: PullRequestInfo["state"];
-  readonly baseRefName: string;
-  readonly headRefName: string;
-  readonly checks: {
-    readonly state: PullRequestInfo["checks"]["state"];
-    readonly passedCount: number;
-    readonly failedCount: number;
-    readonly pendingCount: number;
-    readonly totalCount: number;
-  };
-  readonly review: { readonly state: PullRequestInfo["review"]["state"]; readonly reviewRequestCount: number };
-  readonly mergeability: { readonly state: PullRequestInfo["mergeability"] };
-  readonly attention: PullRequestInfo["attention"];
-  readonly autoMerge: boolean;
-  readonly inMergeQueue: boolean | null;
-  readonly updatedAt: string;
+const pullRequestSchema = z.object({
+  number: z.number().int().positive(),
+  title: z.string(),
+  url: z.string(),
+  state: z.enum(["draft", "open", "merged", "closed"]),
+  baseRefName: z.string(),
+  headRefName: z.string(),
+  checks: z.object({
+    state: z.enum(["passing", "failing", "pending", "no_checks", "unknown"]),
+    totalCount: z.number(),
+    passedCount: z.number(),
+    failedCount: z.number(),
+    pendingCount: z.number(),
+  }),
+  review: z.object({
+    state: z.enum(["approved", "changes_requested", "review_required", "review_requested", "none"]),
+    reviewRequestCount: z.number(),
+  }),
+  mergeability: z.object({ state: z.enum(["mergeable", "conflicts", "blocked", "draft", "unknown"]) }),
+  attention: z.enum([
+    "blocked",
+    "changes_requested",
+    "checks_failed",
+    "checks_pending",
+    "closed",
+    "conflicts",
+    "draft",
+    "merged",
+    "none",
+    "queued",
+    "ready_to_merge",
+    "review_requested",
+  ]),
+  autoMerge: z.boolean(),
+  inMergeQueue: z.boolean().nullable(),
+  updatedAt: z.string(),
+});
+
+const pullRequestRowsSchema = z.record(
+  z.string(),
+  z.discriminatedUnion("outcome", [
+    z.object({ outcome: z.literal("available"), pullRequest: pullRequestSchema }),
+    z.object({ outcome: z.literal("absent") }),
+    z.object({ outcome: z.literal("unavailable"), message: z.string() }),
+  ]),
+);
+
+type PullRequestEntry = z.infer<typeof pullRequestSchema>;
+
+/** One environment's pull request. BB 0.48 moved this from sdk.environments to its GitHub PR Status plugin. */
+export async function readPullRequest(sdk: Sdk, environmentId: string) {
+  const rows = await sdk.plugins.callRpc({
+    pluginId: "bb--github-pr-status",
+    method: "pullRequests",
+    input: { keys: [environmentId] },
+    outputSchema: pullRequestRowsSchema,
+  });
+  return rows[environmentId] ?? { outcome: "unavailable" as const, message: "BB sent no pull request for this environment" };
 }
 
 export function pullRequestInfo(pr: PullRequestEntry): PullRequestInfo {
@@ -547,7 +586,7 @@ export function createProjectSource(bb: BbPluginApi, storage: SnapshotStorage = 
         const environment = await threadEnvironment(sdk, threadId);
         if (!environment.ok) return environment;
         const [answer, env] = await Promise.all([
-          sdk.environments.pullRequest({ environmentId: environment.environmentId }),
+          readPullRequest(sdk, environment.environmentId),
           sdk.environments.get({ environmentId: environment.environmentId }),
         ]);
         if (answer.outcome === "unavailable") return failure("unavailable", answer.message);

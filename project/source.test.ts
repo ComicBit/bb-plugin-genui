@@ -7,7 +7,7 @@ import { createProjectSource, diffQuery, outcomeFailure } from "./source";
 type Fake = Record<string, Record<string, (args: never) => unknown>>;
 
 /** A BB with one project's threads and one checkout; only what source.ts calls. */
-function fakeBb(overrides: Fake = {}) {
+function fakeBb(overrides: Fake = {}, pullRequestRows: unknown = { env_a: { outcome: "absent" } }) {
   const calls: { method: string; args: unknown }[] = [];
   const kv = new Map<string, unknown>();
   const threads: Record<string, object> = {
@@ -110,7 +110,12 @@ function fakeBb(overrides: Fake = {}) {
         calls.push({ method: "diffPatch", args });
         return { outcome: "available", patches: args.paths.map((path) => ({ path, patch: `@@ ${path}`, truncated: false })) };
       },
-      pullRequest: async () => ({ outcome: "absent" }),
+    },
+    plugins: {
+      callRpc: async (args: { outputSchema: { parse: (raw: unknown) => unknown } }) => {
+        calls.push({ method: "plugins.callRpc", args });
+        return args.outputSchema.parse(pullRequestRows);
+      },
     },
     ...overrides,
   };
@@ -194,6 +199,72 @@ describe("Changes", () => {
       expect(await source.patches("thr_mine00", { kind: "branch" }, [path])).toMatchObject({ ok: false, reason: "invalid" });
     }
     expect(calls.some((call) => call.method === "diffPatch")).toBe(false);
+  });
+});
+
+describe("PullRequest", () => {
+  const available = {
+    number: 42,
+    title: "Add widget",
+    url: "https://github.com/example/repo/pull/42",
+    state: "open",
+    baseRefName: "main",
+    headRefName: "feat",
+    checks: { state: "passing", totalCount: 5, passedCount: 4, failedCount: 0, pendingCount: 1 },
+    review: { state: "review_requested", reviewRequestCount: 2 },
+    mergeability: { state: "mergeable", mergeStateStatus: "CLEAN", mergeable: "MERGEABLE" },
+    attention: "review_requested",
+    autoMerge: true,
+    inMergeQueue: null,
+    updatedAt: "2026-10-09T12:00:00Z",
+  };
+
+  it("maps the pull request BB's GitHub PR Status plugin sends", async () => {
+    const { source } = fakeBb({}, { env_a: { outcome: "available", pullRequest: available } });
+    expect(await source.pullRequest("thr_mine00")).toMatchObject({
+      ok: true,
+      branch: "feat",
+      pullRequest: {
+        number: 42,
+        title: "Add widget",
+        state: "open",
+        baseRef: "main",
+        headRef: "feat",
+        checks: { state: "passing", passed: 4, failed: 0, pending: 1, total: 5 },
+        review: { state: "review_requested", requests: 2 },
+        mergeability: "mergeable",
+        attention: "review_requested",
+        autoMerge: true,
+        inMergeQueue: false,
+        updatedAt: Date.parse("2026-10-09T12:00:00Z"),
+      },
+    });
+  });
+
+  it("asks the GitHub PR Status plugin for the thread's environment", async () => {
+    const { source, calls } = fakeBb();
+    await source.pullRequest("thr_mine00");
+    const call = calls.find((entry) => entry.method === "plugins.callRpc");
+    expect(call?.args).toMatchObject({ pluginId: "bb--github-pr-status", method: "pullRequests", input: { keys: ["env_a"] } });
+  });
+
+  it("has no pull request when BB says there is none", async () => {
+    expect(await fakeBb().source.pullRequest("thr_mine00")).toMatchObject({ ok: true, branch: "feat", pullRequest: null });
+  });
+
+  it("carries BB's message when the pull request is unavailable", async () => {
+    const { source } = fakeBb({}, { env_a: { outcome: "unavailable", message: "GitHub is not connected" } });
+    expect(await source.pullRequest("thr_mine00")).toMatchObject({ ok: false, reason: "unavailable", message: "GitHub is not connected" });
+  });
+
+  it("is unavailable when BB sent no row for the environment", async () => {
+    const { source } = fakeBb({}, {});
+    expect(await source.pullRequest("thr_mine00")).toMatchObject({ ok: false, reason: "unavailable" });
+  });
+
+  it("is unavailable, without throwing, when BB sends a malformed row", async () => {
+    const { source } = fakeBb({}, { env_a: { outcome: "available", pullRequest: { ...available, state: "sideways" } } });
+    expect(await source.pullRequest("thr_mine00")).toMatchObject({ ok: false, reason: "unavailable" });
   });
 });
 

@@ -34,6 +34,7 @@ let root: Root;
 let height = 120;
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("IntersectionObserver", undefined);
   vi.stubGlobal("ResizeObserver", BoxObserver);
   vi.spyOn(Element.prototype, "getClientRects").mockImplementation(function (this: Element) {
     return (this.closest("[hidden]") === null ? [new DOMRect(0, 0, 400, height)] : []) as unknown as DOMRectList;
@@ -66,6 +67,37 @@ function panel(hidden: boolean): number {
 }
 
 describe("SourceView", () => {
+  it("waits until code enters the viewport, then keeps the viewer when it leaves", () => {
+    const intersections = new Set<(isIntersecting: boolean) => void>();
+    vi.stubGlobal("IntersectionObserver", class {
+      private readonly notify: (isIntersecting: boolean) => void;
+      constructor(callback: (entries: { isIntersecting: boolean }[]) => void) {
+        this.notify = (isIntersecting) => callback([{ isIntersecting }]);
+      }
+      observe() {
+        intersections.add(this.notify);
+      }
+      disconnect() {
+        intersections.delete(this.notify);
+      }
+    });
+
+    act(() => root.render(<SourceView content="const a = 1;" path="snippet.ts" />));
+    act(() => intersections.forEach((notify) => notify(false)));
+    expect(container.querySelector('[role="status"]')?.getAttribute("aria-label")).toBe("Loading code");
+    expect(container.querySelector("pre")).toBeNull();
+
+    act(() => intersections.forEach((notify) => notify(true)));
+    const viewer = container.querySelector("pre");
+    expect(viewer?.textContent).toBe("const a = 1;");
+    expect(container.querySelector('[role="status"]')).toBeNull();
+    expect(intersections.size).toBe(0);
+
+    act(() => intersections.forEach((notify) => notify(false)));
+    expect(container.querySelector("pre")).toBe(viewer);
+    expect(viewers.mounted).toBe(1);
+  });
+
   it("makes a new viewer each time it is hidden, and keeps it when shown again", () => {
     expect(panel(false)).toBe(1);
     expect(panel(true)).toBe(2);
