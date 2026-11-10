@@ -284,15 +284,19 @@ export default async function plugin(bb: BbPluginApi) {
   // same session resolution, so the code-work section below reaches exactly
   // the sessions that get the other three. Bounded; oldest forgotten first.
   const personThreads = new Set<string>();
+  // Plugins whose root threads the user starts by typing into a composer they
+  // show, so a person reads the replies: side chats, and threads started from
+  // the Focus Board's new-thread composer.
+  const PERSON_PLUGINS = new Set(["side-chat", "focus-board"]);
   bb.agents.configure((context) => {
     // Only sessions whose replies a person reads in chat: not threads another
     // agent spawned (their reply goes back to that agent) and not threads a
-    // plugin runs (workflows, automations), except the user's side chats and
+    // plugin runs (workflows, automations), except PERSON_PLUGINS' threads and
     // the subthreads `bb genui ask` opens to try a prompt.
     const forPerson =
       context.pluginMetadata.audience === "person" ||
       (context.thread.parentThreadId === null &&
-        (context.origin.pluginId === null || context.origin.pluginId === "side-chat"));
+        (context.origin.pluginId === null || PERSON_PLUGINS.has(context.origin.pluginId)));
     personThreads.delete(context.thread.id);
     if (!forPerson) return { tools: [], skills: [] };
     personThreads.add(context.thread.id);

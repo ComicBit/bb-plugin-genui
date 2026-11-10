@@ -6,8 +6,9 @@ The internals behind [the README](../README.md): how agents learn the language, 
 
 1. Sessions whose replies a person reads get four instruction sections from
    `instructions.ts`. Threads spawned by another agent get none, and neither
-   do threads run by plugins other than side chat (for example workflows),
-   except the subthreads `bb genui ask` opens to try a prompt.
+   do threads run by plugins (for example workflows), except side chats,
+   threads started from the Focus Board's composer, and the subthreads
+   `bb genui ask` opens to try a prompt.
    - `UI_REFERENCE` (the syntax; the Layout, Content, Data and Project
      signatures, generated from the catalog; when to write ```app) rides on
      the optional `check_ui` tool's instructions, and `UI_REFERENCE_MORE`

@@ -4,6 +4,11 @@ What changed in each version of the Generative UI plugin for BB. Update an insta
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- Threads started from the [Focus Board](https://github.com/lukehowlett97/bb-plugin-focus-board)'s new-thread composer get the inline UI instructions. BB records them as started by that plugin, so they were skipped like workflow threads, although a person reads their replies.
+
 ## [0.3.2] - 2026-11-07
 
 ### Fixed
