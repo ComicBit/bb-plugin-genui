@@ -1,7 +1,7 @@
 // The height BB's code viewer draws a block of code at, learned on this
 // device. The viewer (experimental_SourceCode) shows a fixed skeleton while
 // it highlights, then draws the code at a height set by its line count alone
-// (lines never wrap: overflow "scroll"). A Code or Snippet body holds the
+// (with overflow "scroll"; a block set to wrap holds no height). A Code or Snippet body holds the
 // height its line count will take while the file loads and the viewer
 // highlights, so the card neither shrinks nor grows when the code arrives.
 // Kept in localStorage: a fresh page has no highlighted code yet.
