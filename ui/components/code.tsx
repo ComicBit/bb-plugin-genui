@@ -4,16 +4,19 @@
 import { type MouseEvent, type ReactNode, type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import {
+  type CodeOverflowMode,
   experimental_Diff as HostDiff,
   experimental_SourceCode as HostSourceCode,
   Markdown,
 } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
 import { Icon } from "@/components/ui/icon";
+import { cn } from "@/lib/utils";
 import { useCodeHeight } from "../codeHeight";
 import { useUiRuntime } from "../runtime";
 import { useSketchFont } from "../sketchFont";
 import { useBackdropColor, useDarkTheme } from "../theme";
+import { propsKey, usePersistedState } from "../usePersistedState";
 import { finiteNumber, optionalText, text, type Props } from "../values";
 import { DIAGRAM_SVG, DiagramDetails, DiagramViewer } from "./diagram";
 import { ErrorLine } from "./display";
@@ -82,6 +85,38 @@ function CopyButton({ code }: { code: string }) {
   );
 }
 
+const acceptOverflow = (stored: unknown): CodeOverflowMode | null => (stored === "wrap" || stored === "scroll" ? stored : null);
+
+/** Whether a block's long lines wrap, kept across remounts and reloads like Logs' toggle. Off by default, as in BB. */
+export function useLineWrap(id: string) {
+  return usePersistedState<CodeOverflowMode>(`${id}:overflow`, "scroll", acceptOverflow);
+}
+
+/** BB's "Wrap lines" toggle for its code and diff viewers. */
+export function WrapButton({
+  overflow,
+  onChange,
+  className = ICON_BUTTON,
+}: {
+  overflow: CodeOverflowMode;
+  onChange: (next: CodeOverflowMode) => void;
+  className?: string;
+}) {
+  const wrap = overflow === "wrap";
+  return (
+    <button
+      type="button"
+      aria-pressed={wrap}
+      aria-label="Wrap lines"
+      title={wrap ? "Don't wrap lines" : "Wrap lines"}
+      onClick={() => onChange(wrap ? "scroll" : "wrap")}
+      className={cn(className, wrap && "bg-muted text-foreground")}
+    >
+      <Icon name="TextWrap" className="size-3.5" />
+    </button>
+  );
+}
+
 /**
  * The path BB's viewer gets for `content`. The viewer caches what it renders
  * by path, so two blocks with one path but different content (two bash
@@ -125,12 +160,12 @@ function useTimesHidden(element: RefObject<HTMLElement | null>): number {
  * it is shown), so the box comes back drawn and at its height.
  * @pierre/diffs 1.3.0 fixed it; this can go once BB ships that.
  */
-export function SourceView({ content, path }: { content: string; path: string }) {
+export function SourceView({ content, path, overflow = "scroll" }: { content: string; path: string; overflow?: CodeOverflowMode }) {
   const box = useRef<HTMLDivElement>(null);
   const hidden = useTimesHidden(box);
   return (
     <div ref={box}>
-      <HostSourceCode key={hidden} content={content} path={path} overflow="scroll" />
+      <HostSourceCode key={hidden} content={content} path={path} overflow={overflow} />
     </div>
   );
 }
@@ -139,9 +174,20 @@ export function Code({ props }: { props: Props }) {
   const code = text(props.code);
   const language = optionalText(props.language)?.trim().toLowerCase() || null;
   const extension = language === null ? "txt" : (EXTENSIONS[language] ?? language.replace(/[^a-z0-9]/g, "")) || "txt";
+  const [overflow, setOverflow] = useLineWrap(`code:${propsKey([code, language])}`);
   return (
-    <CodeFrame caption={<span className="truncate">{language ?? "code"}</span>} actions={<CopyButton code={code} />} lines={code.split("\n").length}>
-      <SourceView content={code} path={viewerPath(`snippet.${extension}`, code)} />
+    <CodeFrame
+      caption={<span className="truncate">{language ?? "code"}</span>}
+      actions={
+        <span className="flex shrink-0 items-center gap-0.5">
+          <WrapButton overflow={overflow} onChange={setOverflow} />
+          <CopyButton code={code} />
+        </span>
+      }
+      // Wrapped lines take more height than their count says: nothing to hold the body at.
+      lines={overflow === "wrap" ? null : code.split("\n").length}
+    >
+      <SourceView content={code} path={viewerPath(`snippet.${extension}`, code)} overflow={overflow} />
     </CodeFrame>
   );
 }
@@ -168,6 +214,7 @@ export function Snippet({ props }: { props: Props }) {
     range = to !== null ? `L${from}–${to}` : requestedFrom !== null ? `L${from}+` : null;
   }
   const label = range === null ? path : `${path} ${range}`;
+  const [overflow, setOverflow] = useLineWrap(`snippet:${propsKey([path, requestedFrom, to])}`);
 
   let body: ReactNode;
   if (error !== null) {
@@ -185,11 +232,11 @@ export function Snippet({ props }: { props: Props }) {
       </div>
     );
   } else {
-    body = <SourceView content={code} path={viewerPath(path, code)} />;
+    body = <SourceView content={code} path={viewerPath(path, code)} overflow={overflow} />;
   }
 
   // The viewer draws one line per newline-separated part; while the file loads, the range asked for is the best guess.
-  const lines = error !== null ? null : code !== null ? code.split("\n").length : to !== null && to >= from ? to - from + 1 : null;
+  const lines = error !== null || overflow === "wrap" ? null : code !== null ? code.split("\n").length : to !== null && to >= from ? to - from + 1 : null;
   return (
     <CodeFrame
       lines={lines}
@@ -203,6 +250,7 @@ export function Snippet({ props }: { props: Props }) {
       }
       actions={
         <span className="flex shrink-0 items-center gap-0.5">
+          {code === null || error !== null ? null : <WrapButton overflow={overflow} onChange={setOverflow} />}
           {openFile === null ? null : (
             <button
               type="button"
@@ -241,6 +289,7 @@ export function Diff({ props }: { props: Props }) {
   const lines = patch.split("\n");
   const added = lines.filter((line) => line.startsWith("+") && !line.startsWith("+++")).length;
   const removed = lines.filter((line) => line.startsWith("-") && !line.startsWith("---")).length;
+  const [overflow, setOverflow] = useLineWrap(`diff:${propsKey(patch)}`);
   return (
     <CodeFrame
       caption={
@@ -250,10 +299,10 @@ export function Diff({ props }: { props: Props }) {
           <span className="shrink-0 tabular-nums text-destructive">−{removed}</span>
         </>
       }
-      actions={null}
+      actions={<WrapButton overflow={overflow} onChange={setOverflow} />}
     >
       {/* Without a header the host completes the patch from `path`. */}
-      <HostDiff patch={patch} path={path ?? "file"} overflow="scroll" />
+      <HostDiff patch={patch} path={path ?? "file"} overflow={overflow} />
     </CodeFrame>
   );
 }

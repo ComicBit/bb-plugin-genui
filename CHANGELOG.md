@@ -4,6 +4,11 @@ What changed in each version of the Generative UI plugin for BB. Update an insta
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Code, Snippet, Diff and the diffs in Changes have a **Wrap lines** button, like BB's own file and diff viewers. Long lines scroll until it is turned on; each block remembers its choice.
+
 ## [0.3.2] - 2026-11-07
 
 ### Fixed
