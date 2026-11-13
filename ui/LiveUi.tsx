@@ -19,7 +19,7 @@ import {
 } from "./FrameFooter";
 import { RenderNodes } from "./render";
 import { useReservedHeight } from "./reservedHeight";
-import { AnswersContext, UiRuntimeContext, type Answers, type UiRuntime } from "./runtime";
+import { useKeepUnansweredActions, AnswersContext, UiRuntimeContext, type Answers, type UiRuntime } from "./runtime";
 import { openableLink } from "./components/action-logic";
 import { HintProvider } from "./components/inputs";
 import { EntranceContext, newStreamCadence, trackStream, useMotionScope } from "./components/motion";
@@ -207,7 +207,7 @@ export function LiveUi({
     );
     return placed === -1 ? UNPLACED : placed;
   }, []);
-  const answers = useBlockAnswerTarget(target, stateKey, place);
+  const answers = useBlockAnswerTarget(target, stateKey, superseded === true, place);
 
   const { roots, diagnostics } = useMemo(() => evaluate(program, state, data), [program, state, data]);
   // Memoized elements let React skip the tree when only a parent re-renders.
@@ -279,11 +279,17 @@ export function LiveUi({
 export function useBlockAnswerTarget(
   target: AnswerTarget,
   stateKey: string,
+  superseded: boolean,
   position: (question: string) => number,
 ): Answers {
+  const keep = useKeepUnansweredActions();
   const sheet = target.kind === "thread" ? sheetFor(target.threadId) : GALLERY_SHEET;
   const block = useBlockAnswers(sheet, stateKey);
   const mode: Answers["target"] = target.kind === "gallery" ? "gallery" : block.composer ? "composer" : "direct";
+  // A later user message after a draft emptied with this block's answers in it: they were sent.
+  useEffect(() => {
+    if (superseded && !keep) sheet.supersede(stateKey);
+  }, [superseded, keep, sheet, stateKey, block]);
   const stage = useCallback(
     async (question: string, answer: { readonly text: string; readonly selection: Selection } | null) => {
       if (answer === null) {

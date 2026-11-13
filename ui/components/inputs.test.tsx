@@ -44,7 +44,7 @@ const GALLERY: AnswerTarget = { kind: "gallery" };
 /** A block's questions on the answer sheet `target`; each test is its own block, so no pick carries over. */
 let blockKey = "";
 function Block({ target, children }: { target: AnswerTarget; children: ReactNode }) {
-  const answers = useBlockAnswerTarget(target, blockKey, () => 0);
+  const answers = useBlockAnswerTarget(target, blockKey, false, () => 0);
   return <AnswersContext value={answers}>{children}</AnswersContext>;
 }
 

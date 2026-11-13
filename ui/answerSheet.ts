@@ -146,7 +146,7 @@ export class AnswerSheet {
   /**
    * The draft emptied with the block in it, and BB wasn't (yet) seen
    * submitting: the answers stay staged until the send is confirmed
-   * (`onSubmitted`) or the user writes on, which
+   * (`onSubmitted`, or the reply superseded) or the user writes on, which
    * makes it a deletion.
    */
   private sending = false;
@@ -319,6 +319,24 @@ export class AnswerSheet {
       );
     }
     this.commit(blocks);
+  }
+
+  /**
+   * The reply holding `block` now has a user message after it. When the
+   * draft emptied with its answers in it, that message was them: they are
+   * sent (the fallback for a composer that reports no submissions).
+   */
+  supersede(block: string): void {
+    if (!this.sending) return;
+    const settled = this.entries.filter((entry) => entry.block === block);
+    if (settled.length === 0) return;
+    this.entries = this.entries.filter((entry) => entry.block !== block);
+    if (this.entries.length === 0) this.sending = false;
+    this.addSent(
+      block,
+      settled.map((entry) => ({ question: entry.question, text: entry.text })),
+    );
+    this.commit([block]);
   }
 
   /** The composer the sheet writes to: the first attached. */

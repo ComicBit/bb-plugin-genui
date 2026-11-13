@@ -1,3 +1,4 @@
+import { useSettings } from "@get-bb/plugin-sdk/app";
 import { createContext, useContext } from "react";
 import type { Action, Value } from "../core/types";
 import type { SentAnswer, SheetEntry, Selection } from "./answerSheet";
@@ -87,7 +88,7 @@ export interface UiRuntime {
   loadAsset: ((src: string) => Promise<AssetBytes>) | null;
   /**
    * True once the thread has a user message after the reply holding this
-   * block. This is conversation activity, not evidence that a choice was answered.
+   * block (typed, or sent from any UI): its choices are no longer the question.
    */
   superseded: boolean;
   /**
@@ -159,11 +160,13 @@ export function sentFor(
 }
 
 /**
- * Only a recorded submission closes a question. Conversation activity,
- * including user-role system messages, is not evidence of an answer.
+ * Whether `question` is no longer open: it was answered, the block sent an
+ * answer before answers were staged (one closed every choice), or the thread
+ * moved on.
  */
-export function questionClosed(sent: readonly SentAnswer[] | null, question: string): boolean {
-  return sent?.some((answer) => answer.question === question || answer.question === null) ?? false;
+export function useQuestionClosed(sent: readonly SentAnswer[] | null, question: string, superseded: boolean): boolean {
+  const keep = useKeepUnansweredActions();
+  return (!keep && superseded) || (sent?.some((answer) => answer.question === question || answer.question === null) ?? false);
 }
 
 /**
@@ -174,3 +177,8 @@ export const CardDepthContext = createContext(0);
 
 /** True inside a Table cell, where Badges render as a status dot plus text. */
 export const InTableContext = createContext(false);
+
+/** Shared reactive policy for controls and composer submission inference. */
+export function useKeepUnansweredActions(): boolean {
+  return useSettings().values?.keepUnansweredActions === true;
+}

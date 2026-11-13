@@ -63,6 +63,13 @@ const MAX_PERSON_THREADS = 10_000;
 
 /** Declared here so BB lists it; the page reads it (ui/components/motion.ts). */
 export const MOTION_SETTINGS = {
+  keepUnansweredActions: {
+    type: "boolean",
+    label: "Keep unanswered actions available",
+    description:
+      "Keeps unanswered buttons, forms and other choices available after later messages, so you can answer when you return. Off, later user messages close earlier choices as before. Sent answers stay closed either way.",
+    default: false,
+  },
   animations: {
     type: "boolean",
     label: "Animations",

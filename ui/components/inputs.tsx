@@ -5,7 +5,7 @@ import { Icon } from "@/components/ui/icon";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { resolveIconName } from "../icons";
-import { CardDepthContext, NodeKeyContext, questionClosed, sentFor, useAnswers, useUiRuntime } from "../runtime";
+import { CardDepthContext, NodeKeyContext, useQuestionClosed, sentFor, useAnswers, useUiRuntime } from "../runtime";
 import {
   finiteNumber,
   formatNumber,
@@ -511,13 +511,14 @@ const SENT_ENTRANCE: Entrance = { keyframes: [{ opacity: 0 }, { opacity: 1 }], d
 const CHOICE_FADE_MS = 200;
 
 /**
- * Whether `question` is closed (its answer was sent)
+ * Whether `question` is closed (its answer was sent, or the thread moved on)
  * and, once its fade has run, gone. Choices closed before they mounted are
  * gone at once; ones closed on screen fade first.
  */
 export function useClosedChoices(question: string): { closed: boolean; gone: boolean } {
+  const { superseded } = useUiRuntime();
   const { sent } = useAnswers();
-  const closed = questionClosed(sent, question);
+  const closed = useQuestionClosed(sent, question, superseded);
   const [gone, setGone] = useState(closed);
   useEffect(() => {
     if (!closed) {
@@ -548,7 +549,7 @@ function answerTexts(props: Props): string[] {
  * choice buttons (Send, or no action) are a single-select toggle: a pick
  * stages its answer in the user's message (useAnswers), picking it again
  * withdraws it, a sibling switches. Once the answer is sent they fold into
- * one line showing it. Unanswered choices stay available.
+ * one line showing it, and once the thread moved on without one they leave.
  * Other buttons (links, copies, local state) run at once and stay.
  * `question` names it where the buttons' keys are not node keys.
  */

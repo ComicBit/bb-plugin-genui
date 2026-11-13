@@ -121,6 +121,7 @@ function fakeComposer(threadId: string, reports = true): FakeComposer {
 const bb = vi.hoisted(() => ({
   composers: null as null | FakeComposer,
   send: vi.fn(async () => ({})),
+  keep: true,
   superseded: false,
   supersededListeners: new Set<() => void>(),
 }));
@@ -135,7 +136,13 @@ vi.mock("@get-bb/plugin-sdk/app", async (importOriginal) => ({
   useSdk: () => ({ threads: { send: bb.send } }),
   useBbNavigate: () => ({}),
   useRpc: () => ({ call: vi.fn() }),
-  useSettings: () => ({ values: { animations: false }, isLoading: false }),
+  useSettings: () => {
+    useSyncExternalStore(
+      (listener) => { bb.supersededListeners.add(listener); return () => bb.supersededListeners.delete(listener); },
+      () => bb.keep,
+    );
+    return { values: { animations: false, keepUnansweredActions: bb.keep }, isLoading: false };
+  },
   Markdown: ({ content }: { content: string }) => <p>{content}</p>,
   experimental_Icon: () => <span aria-hidden="true" />,
 }));
@@ -207,6 +214,7 @@ beforeEach(() => {
   fake = fakeComposer(`thr_${thread}`);
   bb.composers = fake;
   bb.send.mockClear();
+  bb.keep = true;
   bb.superseded = false;
   mountReply(`thr_${thread}`);
 });
@@ -358,6 +366,37 @@ describe("the composer is the answer sheet", () => {
     expect(fake.sent.map((draft) => draft.text)).toEqual(["Basic"]);
     expect(within(block1).getByRole("status").textContent).toContain("Basic");
     expect(within(block1).getByRole("status").textContent).not.toContain("Pro");
+  });
+
+  it("defaults to closing unanswered choices, and reopens them when preservation is enabled", async () => {
+    act(() => { bb.keep = false; });
+    supersede();
+    await wait(250);
+    expect(within(block1).queryByRole("button", { name: "Pro" })).toBeNull();
+    act(() => {
+      bb.keep = true;
+      for (const listener of [...bb.supersededListeners]) listener();
+    });
+    await wait(250);
+    fireEvent.click(within(block1).getByRole("button", { name: "Pro" }));
+    expect(fake.composer.draft.text).toContain("Pro");
+    act(() => fake.send());
+    await wait(250);
+    expect(within(block1).getByRole("status").textContent).toContain("Pro");
+  });
+
+  it("retains legacy inferred submission with preservation off", async () => {
+    cleanup();
+    thread++;
+    bb.keep = false;
+    fake = fakeComposer(`thr_${thread}`, false);
+    bb.composers = fake;
+    mountReply(`thr_${thread}`);
+    fireEvent.click(within(block1).getByRole("button", { name: "Pro" }));
+    act(() => fake.send());
+    supersede();
+    await wait(250);
+    expect(within(block1).getByRole("status").textContent).toContain("Pro");
   });
 
   it.each(["assistant followup", "synthetic user message", "genuine user followup"])(

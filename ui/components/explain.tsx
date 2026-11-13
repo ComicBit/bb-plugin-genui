@@ -8,7 +8,7 @@ import { Icon as HostIcon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import { resolveIconName } from "../icons";
 import { RenderNode } from "../render";
-import { NodeKeyContext, questionClosed, sentFor, useAnswers, useUiRuntime } from "../runtime";
+import { NodeKeyContext, useQuestionClosed, sentFor, useAnswers, useUiRuntime } from "../runtime";
 import { ACCENT, isNode, list, TONE_DOT, TONE_PILL, TONE_TEXT, type Props } from "../values";
 import { ACTION_GLYPHS, actionIntent, sendEffect } from "./action-logic";
 import { Code } from "./code";
@@ -381,8 +381,10 @@ function ListItem({ row, leading, choice }: { row: ListRow; leading: Leading; ch
 
 /** Rows; the rows that reply (a Send) are one question, a single-select whose pick goes into the user's message. */
 export function List({ props }: { props: Props }) {
+  const { superseded } = useUiRuntime();
   const { staged, sent, stage } = useAnswers();
   const question = useContext(NodeKeyContext);
+  const closed = useQuestionClosed(sent, question, superseded);
   const rows = parseListRows(props.items);
   if (rows.length === 0) {
     return list(props.items).length === 0 ? null : <ErrorLine message="List items need a title" />;
@@ -394,7 +396,6 @@ export function List({ props }: { props: Props }) {
       ? "dot"
       : null;
   const replying = rows.some((row) => sentTexts(row.actions).length > 0);
-  const closed = questionClosed(sent, question);
   const answered = sentFor(sent, question, (text) => rows.some((row) => sentTexts(row.actions).includes(text)));
   const picked = staged.get(question)?.selection ?? null;
   return (
