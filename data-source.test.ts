@@ -15,11 +15,15 @@ interface FakeFile {
 }
 
 /** Just the SDK calls the loader makes, over an in-memory file table. */
-function fakeBb(files: Record<string, string | FakeFile>, reads: string[] = []): BbPluginApi {
+function fakeBb(
+  files: Record<string, string | FakeFile>,
+  reads: string[] = [],
+  { workspace = WORKSPACE, storage = STORAGE }: { workspace?: string; storage?: string } = {},
+): BbPluginApi {
   const sdk = {
     threads: {
-      get: async () => ({ id: "thr_1", environment: { id: "env_1", path: WORKSPACE, hostId: "host_1" } }),
-      storageLocation: async () => ({ storageRootPath: STORAGE, hostId: "host_1" }),
+      get: async () => ({ id: "thr_1", environment: { id: "env_1", path: workspace, hostId: "host_1" } }),
+      storageLocation: async () => ({ storageRootPath: storage, hostId: "host_1" }),
     },
     files: {
       read: async ({ path, rootPath }: { path: string; rootPath: string }) => {
@@ -73,6 +77,39 @@ describe("loadThreadFile", () => {
     const bb = fakeBb({ "/work/secrets.json": "{}" }, reads);
     expect(await loadThreadFile(bb, "thr_1", "../secrets.json")).toMatchObject({ ok: false });
     expect(await loadThreadFile(bb, "thr_1", "$BB_THREAD_STORAGE/../../secret.json")).toMatchObject({ ok: false });
+    expect(reads).toEqual([]);
+  });
+
+  it("resolves paths by the rules of a Windows host, whatever the server runs on", async () => {
+    const roots = { workspace: "C:\\Users\\u\\repo", storage: "C:\\Users\\u\\.bb\\thread-storage\\thr_1" };
+    const reads: string[] = [];
+    const bb = fakeBb(
+      {
+        "C:\\Users\\u\\.bb\\thread-storage\\thr_1\\shot.json": "1",
+        "C:\\Users\\u\\repo\\bench\\results.json": "2",
+      },
+      reads,
+      roots,
+    );
+    expect(await loadThreadFile(bb, "thr_1", "$BB_THREAD_STORAGE/shot.json")).toEqual({ ok: true, value: 1 });
+    expect(await loadThreadFile(bb, "thr_1", "bench/results.json")).toEqual({ ok: true, value: 2 });
+    expect(await loadThreadFile(bb, "thr_1", "C:/Users/u/repo/bench/results.json")).toEqual({ ok: true, value: 2 });
+    expect(await loadThreadFile(bb, "thr_1", "c:\\users\\u\\.bb\\thread-storage\\thr_1\\shot.json")).toMatchObject({ ok: false, error: "file not found" });
+    expect(reads.slice(0, 2)).toEqual([
+      `${roots.storage}|${roots.storage}\\shot.json`,
+      `${roots.workspace}|${roots.workspace}\\bench\\results.json`,
+    ]);
+  });
+
+  it("keeps Windows paths inside their roots", async () => {
+    const roots = { workspace: "C:\\Users\\u\\repo", storage: "C:\\Users\\u\\.bb\\thread-storage\\thr_1" };
+    const reads: string[] = [];
+    const bb = fakeBb({}, reads, roots);
+    expect(await loadThreadFile(bb, "thr_1", "$BB_THREAD_STORAGE/../../secret.json")).toMatchObject({ ok: false });
+    expect(await loadThreadFile(bb, "thr_1", "..\\secret.json")).toMatchObject({ ok: false });
+    expect(await loadThreadFile(bb, "thr_1", "C:\\Windows\\win.ini")).toMatchObject({ ok: false });
+    expect(await loadThreadFile(bb, "thr_1", "D:\\Users\\u\\repo\\a.json")).toMatchObject({ ok: false });
+    expect(await loadThreadFile(bb, "thr_1", "/tmp/report.json")).toMatchObject({ ok: false });
     expect(reads).toEqual([]);
   });
 

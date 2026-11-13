@@ -27,10 +27,10 @@ interface Attempt {
  * written second (Linux, where /private/tmp doesn't exist).
  */
 function tempAttempts(target: string, hostId: string): Attempt[] {
-  if (contains("/private/tmp", target)) return [{ root: { path: "/private/tmp", hostId }, target }];
-  if (!contains("/tmp", target)) return [];
+  if (contains("/private/tmp", target, path.posix)) return [{ root: { path: "/private/tmp", hostId }, target }];
+  if (!contains("/tmp", target, path.posix)) return [];
   return [
-    { root: { path: "/private/tmp", hostId }, target: path.join("/private", target) },
+    { root: { path: "/private/tmp", hostId }, target: path.posix.join("/private", target) },
     { root: { path: "/tmp", hostId }, target },
   ];
 }
@@ -89,9 +89,28 @@ type FileContent = { ok: true; content: string; encoding: "utf8" | "base64" } | 
 /** Reads one requested path within its allowed roots; failures are values, never throws. */
 type FileReader = (requested: string, maxBytes: number) => Promise<FileContent>;
 
-function contains(root: string, target: string): boolean {
-  const relative = path.relative(path.resolve(root), target);
-  return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+function contains(root: string, target: string, paths: path.PlatformPath = path): boolean {
+  const relative = paths.relative(paths.resolve(root), target);
+  return relative !== ".." && !relative.startsWith(`..${paths.sep}`) && !paths.isAbsolute(relative);
+}
+
+/** A fully qualified Windows path: `C:\…`, `C:/…` or a `\\server\share\…` UNC path. */
+const WINDOWS_ABSOLUTE = /^(?:[A-Za-z]:[\\/]|\\\\[^\\]+\\[^\\]+)/;
+
+/**
+ * The path rules of the host a path lives on. The server reads files on other
+ * hosts, so its own `node:path` is the wrong one for them: a macOS server would
+ * treat a Windows host's `C:\…\thread-storage\thr_1` as relative and prefix its
+ * own working directory, and a Windows server would turn `/home/u/…` into
+ * `C:\home\u\…`. Windows paths are told apart by their drive or UNC prefix.
+ */
+function hostPaths(hostPath: string): path.PlatformPath {
+  return WINDOWS_ABSOLUTE.test(hostPath) ? path.win32 : path.posix;
+}
+
+/** Whether `requested` is an absolute path on some host (POSIX or Windows). */
+function isHostAbsolute(requested: string): boolean {
+  return requested.startsWith("/") || WINDOWS_ABSOLUTE.test(requested);
 }
 
 async function threadRoots(bb: BbPluginApi, threadId: string): Promise<{ workspace: Root | null; storage: Root | null }> {
@@ -119,21 +138,27 @@ async function readThreadFile(bb: BbPluginApi, threadId: string, requested: stri
   }
   // "$BB_THREAD_STORAGE/…" is the thread storage the agent writes artifacts
   // to; other relative paths are workspace paths; absolute paths must sit
-  // inside one of the two or in /tmp on the environment's host.
+  // inside one of the two or in /tmp on the environment's host. Paths follow
+  // the rules of the host the root is on, not this server's.
   const inside = (root: Root | null, target: string): Attempt[] =>
-    root !== null && contains(root.path, target) ? [{ root, target }] : [];
+    root !== null && hostPaths(root.path) === hostPaths(target) && contains(root.path, target, hostPaths(root.path))
+      ? [{ root, target }]
+      : [];
+  const under = (root: Root | null, relative: string): Attempt[] =>
+    root === null ? [] : inside(root, hostPaths(root.path).resolve(root.path, relative));
   let attempts: Attempt[];
   if (requested.startsWith(THREAD_STORAGE_PREFIX)) {
-    const root = roots.storage;
-    attempts = root === null ? [] : inside(root, path.resolve(root.path, requested.slice(THREAD_STORAGE_PREFIX.length)));
-  } else if (path.isAbsolute(requested)) {
-    const target = path.resolve(requested);
-    const hostId = roots.workspace?.hostId ?? roots.storage?.hostId;
+    attempts = under(roots.storage, requested.slice(THREAD_STORAGE_PREFIX.length));
+  } else if (isHostAbsolute(requested)) {
+    const target = hostPaths(requested).resolve(requested);
+    const host = roots.workspace ?? roots.storage;
     attempts = [...inside(roots.storage, target), ...inside(roots.workspace, target)].slice(0, 1);
-    if (attempts.length === 0 && hostId !== undefined) attempts = tempAttempts(target, hostId);
+    // A Windows host has no /tmp to read screenshots from.
+    if (attempts.length === 0 && host !== null && hostPaths(host.path) === path.posix) {
+      attempts = tempAttempts(target, host.hostId);
+    }
   } else {
-    const root = roots.workspace;
-    attempts = root === null ? [] : inside(root, path.resolve(root.path, requested));
+    attempts = under(roots.workspace, requested);
   }
   if (attempts.length === 0) {
     return { ok: false, error: "only files in this thread's workspace, its thread storage or /tmp can be loaded" };
