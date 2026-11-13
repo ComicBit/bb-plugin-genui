@@ -4,7 +4,7 @@
 import { memo, useCallback, useMemo, useRef } from "react";
 import { useBbNavigate, useComposers, useSdk, type ExperimentalLiveFileTarget } from "@get-bb/plugin-sdk/app";
 import { compileStreaming } from "../core";
-import { fileOpenTarget, THREAD_STORAGE_PREFIX } from "../core/file-target";
+import { fileOpenTarget, isAbsolutePath, THREAD_STORAGE_PREFIX } from "../core/file-target";
 import { useAnswerComposers } from "./answerSheet";
 import { AppBlock } from "./AppBlock";
 import { LiveUi, RenderFailure, type AnswerTarget } from "./LiveUi";
@@ -42,7 +42,7 @@ export function useThreadActions(): ThreadActions {
       // An absolute path is placed by the thread's roots (core/file-target.ts),
       // the same ones data-source.ts reads Image(path) and Load(path) from; a
       // `$BB_THREAD_STORAGE/` path needs neither the thread nor its roots.
-      const absolute = path.startsWith("/");
+      const absolute = isAbsolutePath(path);
       const [thread, storage] = await Promise.all([
         path.startsWith(THREAD_STORAGE_PREFIX) ? null : sdk.threads.get({ threadId, include: "environment" }),
         absolute ? sdk.threads.storageLocation({ threadId }).catch(() => null) : null,
