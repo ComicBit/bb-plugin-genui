@@ -5,7 +5,7 @@ import { Icon } from "@/components/ui/icon";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { resolveIconName } from "../icons";
-import { CardDepthContext, NodeKeyContext, questionClosed, sentFor, useAnswers, useUiRuntime } from "../runtime";
+import { CardDepthContext, NodeKeyContext, useQuestionClosed, sentFor, useAnswers, useUiRuntime } from "../runtime";
 import {
   finiteNumber,
   formatNumber,
@@ -518,7 +518,7 @@ const CHOICE_FADE_MS = 200;
 export function useClosedChoices(question: string): { closed: boolean; gone: boolean } {
   const { superseded } = useUiRuntime();
   const { sent } = useAnswers();
-  const closed = questionClosed(sent, question, superseded);
+  const closed = useQuestionClosed(sent, question, superseded);
   const [gone, setGone] = useState(closed);
   useEffect(() => {
     if (!closed) {

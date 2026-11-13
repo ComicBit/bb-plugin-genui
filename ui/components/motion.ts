@@ -8,7 +8,7 @@
 // is off (reducedMotion, useMotionScope).
 import { createContext, useContext, useLayoutEffect, useRef, type RefObject } from "react";
 import { useSettings } from "@get-bb/plugin-sdk/app";
-import type { MOTION_SETTINGS } from "../../server";
+import type { UI_SETTINGS } from "../../server";
 
 /** Exponential ease-out: fast start, long soft landing. */
 export const EASE_OUT_EXPO = "cubic-bezier(0.16, 1, 0.3, 1)";
@@ -51,7 +51,7 @@ function staggerDelay(): number {
 /** Live: follows the OS setting without a reload. */
 const SYSTEM_REDUCED_MOTION = matchMedia("(prefers-reduced-motion: reduce)");
 
-const ANIMATIONS: keyof typeof MOTION_SETTINGS = "animations";
+const ANIMATIONS: keyof typeof UI_SETTINGS = "animations";
 /**
  * The Animations setting turned off, as a block last read it. Kept in
  * localStorage too: BB answers useSettings after the first blocks of a fresh

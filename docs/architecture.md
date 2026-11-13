@@ -204,7 +204,8 @@ The internals behind [the README](../README.md): how agents learn the language, 
    composer is the truth for what will be sent), unless it empties the
    draft: BB submitting (`isSubmitting`) makes them sent at once; otherwise
    they stay staged until `onSubmitted`, the reply being superseded (the
-   fallback for a composer that reports no submissions), or anything going
+   fallback for a composer that reports no submissions, only when
+   Keep unanswered actions available is off), or anything going
    back into the draft (text, a mention, an attachment) or a new pick, which
    makes it a deletion. A Form stages only on the user's own edit of a
    field, never because the sheet's entry differs from it; its typed answer
@@ -620,3 +621,29 @@ bb genui ask "Plan a day in Lisbon"          # try a prompt in a subthread that 
 ```
 
 Instruction changes apply to provider sessions started after the reload.
+
+
+### Unanswered-action policy
+
+The plugin's `keepUnansweredActions` boolean defaults to false. The reactive
+`useSettings` value feeds the shared `useQuestionClosed` hook and
+`useBlockAnswerTarget`, including sandboxed app answers. When enabled,
+only recorded answers close controls; later messages neither hide nor dim
+unanswered actions. There is no stale-context cue.
+
+While settings are undefined, the policy is unknown: unanswered controls stay
+open and the legacy supersession fallback cannot mutate sent records. Unlike
+the motion preference, a cached value is not authoritative enough for this
+irreversible operation; it could be stale after a change in another client.
+
+`onSubmitted` is the SDK's successful-local-submission receipt and excludes
+failures and manual draft clears. The existing legacy path also recognises
+a draft clearing while `isSubmitting` is observable. If neither signal is
+observed, a legacy real send cannot be distinguished from manual clearing.
+The outline's user role is not proof of human input or a submission from this
+composer, even for a newly arrived row. With preservation enabled, ambiguous
+clears remain unconfirmed; the next edit or pick withdraws the old staging.
+With preservation disabled, the upstream supersession fallback is retained.
+A reliable solution for unobservable legacy sends requires a host submission
+receipt correlated with the composer; neither message arrival nor matching
+text is a substitute.

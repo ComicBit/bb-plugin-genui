@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { hasLaterUserMessage } from "./supersession";
 // A reply with two ```ui blocks (two React roots, as BB mounts them) against
 // a composer that keeps its draft as text plus mention ranges, like BB's.
 import { useSyncExternalStore } from "react";
@@ -22,7 +23,7 @@ interface FakeComposer {
   /** The user edits the draft by hand. */
   edit(next: (current: ComposerDraftSnapshot) => { text: string; mentions?: readonly ComposerMention[] }): void;
   /** The user presses send: BB clears the draft and tells the plugin (when this composer reports submissions). */
-  send(): void;
+  send(keepSubmitting?: boolean): void;
   /** The user types `typed` one key at a time at `at` (default: the end), each key its own draft change. */
   type(typed: string, at?: number): void;
   /** The user attaches a file. */
@@ -93,11 +94,11 @@ function fakeComposer(threadId: string, reports = true): FakeComposer {
       const result = next(draft);
       set({ text: result.text, mentions: [...(result.mentions ?? draft.mentions)], attachments: draft.attachments });
     },
-    send() {
+    send(keepSubmitting = false) {
       sent.push(draft);
       set({ text: "", mentions: [], attachments: [] });
       for (const listener of [...submittedListeners]) listener();
-      submitting = false;
+      if (!keepSubmitting) submitting = false;
     },
     type(typed: string, at?: number) {
       let position = at ?? draft.text.length;
@@ -120,6 +121,7 @@ function fakeComposer(threadId: string, reports = true): FakeComposer {
 const bb = vi.hoisted(() => ({
   composers: null as null | FakeComposer,
   send: vi.fn(async () => ({})),
+  keep: false as boolean | undefined,
   superseded: false,
   supersededListeners: new Set<() => void>(),
 }));
@@ -134,7 +136,13 @@ vi.mock("@get-bb/plugin-sdk/app", async (importOriginal) => ({
   useSdk: () => ({ threads: { send: bb.send } }),
   useBbNavigate: () => ({}),
   useRpc: () => ({ call: vi.fn() }),
-  useSettings: () => ({ values: { animations: false }, isLoading: false }),
+  useSettings: () => {
+    useSyncExternalStore(
+      (listener) => { bb.supersededListeners.add(listener); return () => bb.supersededListeners.delete(listener); },
+      () => bb.keep,
+    );
+    return { values: bb.keep === undefined ? undefined : { animations: false, keepUnansweredActions: bb.keep }, isLoading: false };
+  },
   Markdown: ({ content }: { content: string }) => <p>{content}</p>,
   experimental_Icon: () => <span aria-hidden="true" />,
 }));
@@ -206,6 +214,7 @@ beforeEach(() => {
   fake = fakeComposer(`thr_${thread}`);
   bb.composers = fake;
   bb.send.mockClear();
+  bb.keep = false;
   bb.superseded = false;
   mountReply(`thr_${thread}`);
 });
@@ -359,21 +368,116 @@ describe("the composer is the answer sheet", () => {
     expect(within(block1).getByRole("status").textContent).not.toContain("Pro");
   });
 
-  it("settles the answers as sent on supersession where the composer reports no submissions", async () => {
+  it("defaults to closing unanswered choices, and reopens them when preservation is enabled", async () => {
+    act(() => { bb.keep = false; });
+    supersede();
+    await wait(250);
+    expect(within(block1).queryByRole("button", { name: "Pro" })).toBeNull();
+    act(() => {
+      bb.keep = true;
+      for (const listener of [...bb.supersededListeners]) listener();
+    });
+    await wait(250);
+    fireEvent.click(within(block1).getByRole("button", { name: "Pro" }));
+    expect(fake.composer.draft.text).toContain("Pro");
+    act(() => fake.send());
+    await wait(250);
+    expect(within(block1).getByRole("status").textContent).toContain("Pro");
+  });
+
+  it("does not infer a submission while settings load, then preserves the unanswered control", async () => {
+    cleanup();
+    thread++;
+    bb.keep = undefined;
+    bb.superseded = true;
+    fake = fakeComposer(`thr_${thread}`, false);
+    bb.composers = fake;
+    mountReply(`thr_${thread}`);
+    fireEvent.click(within(block1).getByRole("button", { name: "Pro" }));
+    act(() => fake.edit(() => ({ text: "" })));
+    await wait(250);
+    expect(pressed(block1, "Pro")).toBe("true");
+    act(() => {
+      bb.keep = true;
+      for (const listener of [...bb.supersededListeners]) listener();
+    });
+    await wait(250);
+    expect(pressed(block1, "Pro")).toBe("true");
+    expect(within(block1).queryByText("You sent:")).toBeNull();
+  });
+
+  it("retains legacy inferred submission with preservation off", async () => {
+    cleanup();
+    thread++;
+    bb.keep = false;
+    fake = fakeComposer(`thr_${thread}`, false);
+    bb.composers = fake;
+    mountReply(`thr_${thread}`);
+    fireEvent.click(within(block1).getByRole("button", { name: "Pro" }));
+    act(() => fake.send());
+    supersede();
+    await wait(250);
+    expect(within(block1).getByRole("status").textContent).toContain("Pro");
+  });
+
+  it.each(["assistant followup", "synthetic user message", "genuine user followup"])(
+    "keeps unanswered buttons and forms actionable after %s",
+    async (kind) => {
+      bb.keep = true;
+      act(() => {
+        bb.superseded = hasLaterUserMessage([
+          { id: "reply", role: "assistant" },
+          { id: kind, role: kind === "assistant followup" ? "assistant" : "user" },
+        ], "reply") === true;
+        for (const listener of [...bb.supersededListeners]) listener();
+      });
+      await wait(250);
+      fireEvent.click(within(block1).getByRole("button", { name: "Pro" }));
+      fireEvent.click(within(block2).getByRole("checkbox", { name: "CSV" }));
+      expect(fake.composer.draft.text).toContain("Pro");
+      expect(fake.composer.draft.text).toContain("CSV");
+      act(() => fake.send());
+      await wait(250);
+      expect(within(block1).queryByRole("button", { name: "Pro" })).toBeNull();
+      expect(within(block1).getByRole("status").textContent).toContain("Pro");
+      expect(within(block2).getByText("Sent")).toBeTruthy();
+      expect(fake.sent).toHaveLength(1);
+    },
+  );
+
+  it("confirms a legacy composer submission when its draft clears while submitting", async () => {
+    bb.keep = true;
     cleanup();
     thread++;
     fake = fakeComposer(`thr_${thread}`, false);
     bb.composers = fake;
     mountReply(`thr_${thread}`);
     fireEvent.click(within(block1).getByRole("button", { name: "Pro" }));
+    act(() => fake.startSubmit());
+    act(() => fake.send(true));
+    expect(fake.sent).toHaveLength(1);
+    await wait(250);
+    expect(within(block1).queryByRole("button", { name: "Pro" })).toBeNull();
+    expect(within(block1).getByRole("status").textContent).toContain("Pro");
+  });
+
+  it("does not mistake injection for submission after a manual clear on an already superseded block", async () => {
+    bb.keep = true;
+    cleanup();
+    thread++;
+    fake = fakeComposer(`thr_${thread}`, false);
+    bb.composers = fake;
+    mountReply(`thr_${thread}`);
+    supersede();
+    fireEvent.click(within(block1).getByRole("button", { name: "Pro" }));
     fireEvent.click(within(block2).getByRole("checkbox", { name: "CSV" }));
-    act(() => fake.send());
-    // The draft cleared on send is not a deletion: the picks wait for the send to show.
+    act(() => fake.edit(() => ({ text: "" })));
+    // Clearing by hand and injected activity provide no submission receipt.
     expect(pressed(block1, "Pro")).toBe("true");
     supersede();
     await wait(250);
-    expect(within(block1).getByRole("status").textContent).toContain("Pro");
-    expect(within(block2).getByText("Sent")).toBeTruthy();
+    expect(pressed(block1, "Pro")).toBe("true");
+    expect(within(block2).queryByText("Sent")).toBeNull();
   });
 
   it("writes a staged Form's last typing before a send: on leaving the field, and on Enter", () => {

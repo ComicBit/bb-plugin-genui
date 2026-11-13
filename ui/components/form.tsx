@@ -3,7 +3,7 @@ import { formFields } from "../../core/form";
 import { Button as BaseButton } from "@/components/ui/button";
 import { deferAnswer, flushAnswers } from "../answerSheet";
 import { RenderNodes } from "../render";
-import { NodeKeyContext, questionClosed, sentFor, useAnswers, UiRuntimeContext, useUiRuntime, type UiRuntime } from "../runtime";
+import { NodeKeyContext, useQuestionClosed, sentFor, useAnswers, UiRuntimeContext, useUiRuntime, type UiRuntime } from "../runtime";
 import { nodes, type Props } from "../values";
 import { actionIntent } from "./action-logic";
 import { ActionGlyph, ActionHint, InMessageLine, SentLine } from "./inputs";
@@ -32,7 +32,7 @@ export function Form({ props }: { props: Props }) {
   const question = useContext(NodeKeyContext);
   const fields = formFields({ kind: "node", type: "Form", key: question, props });
   const message = fields.map((field) => field.line).join("\n");
-  const closed = questionClosed(sent, question, runtime.superseded);
+  const closed = useQuestionClosed(sent, question, runtime.superseded);
   const answered = sentFor(sent, question) !== null;
   const entry = staged.get(question);
   const [sending, setSending] = useState(false);

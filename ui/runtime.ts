@@ -1,3 +1,4 @@
+import { useSettings } from "@get-bb/plugin-sdk/app";
 import { createContext, useContext } from "react";
 import type { Action, Value } from "../core/types";
 import type { SentAnswer, SheetEntry, Selection } from "./answerSheet";
@@ -163,8 +164,9 @@ export function sentFor(
  * answer before answers were staged (one closed every choice), or the thread
  * moved on.
  */
-export function questionClosed(sent: readonly SentAnswer[] | null, question: string, superseded: boolean): boolean {
-  return superseded || (sent?.some((answer) => answer.question === question || answer.question === null) ?? false);
+export function useQuestionClosed(sent: readonly SentAnswer[] | null, question: string, superseded: boolean): boolean {
+  const keep = useKeepUnansweredActions();
+  return (keep === false && superseded) || (sent?.some((answer) => answer.question === question || answer.question === null) ?? false);
 }
 
 /**
@@ -175,3 +177,11 @@ export const CardDepthContext = createContext(0);
 
 /** True inside a Table cell, where Badges render as a status dot plus text. */
 export const InTableContext = createContext(false);
+
+/** Shared reactive policy for controls and composer submission inference. */
+export function useKeepUnansweredActions(): boolean | null {
+  const { values } = useSettings();
+  // Unknown must not close controls or irreversibly infer a submission.
+  // A cached false is not authoritative: the setting may have changed elsewhere.
+  return values === undefined ? null : values.keepUnansweredActions === true;
+}

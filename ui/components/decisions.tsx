@@ -40,7 +40,7 @@ import {
   type TaskEstimate,
 } from "../../core/decisions";
 import type { Value } from "../../core/types";
-import { NodeKeyContext, questionClosed, sentFor, useAnswers, useUiRuntime } from "../runtime";
+import { NodeKeyContext, useQuestionClosed, sentFor, useAnswers, useUiRuntime } from "../runtime";
 import { propsKey, usePersistedState } from "../usePersistedState";
 import { formatNumber, TONE_PILL, type Props, type Tone } from "../values";
 import { actionIntent, sendEffect } from "./action-logic";
@@ -233,7 +233,7 @@ export function Plan({ props }: { props: Props }) {
   const checked = steps.map((step, index) => state.toggled[String(index)] ?? !step.optional);
   const message = planMessage(steps, checked);
   const entry = staged.get(question);
-  const closed = questionClosed(sent, question, superseded);
+  const closed = useQuestionClosed(sent, question, superseded);
   // Approved, then the steps changed: the approval follows them (none left: nothing to approve).
   useEffect(() => {
     if (closed || entry === undefined || entry.text === message) return;
@@ -459,6 +459,7 @@ export function Decision({ props }: { props: Props }) {
   const { superseded } = useUiRuntime();
   const { sent } = useAnswers();
   const question = useContext(NodeKeyContext);
+  const frozen = useQuestionClosed(sent, question, superseded);
   const read = readDecision(props.options, props.criteria);
   const criteriaCount = read.ok ? read.model.criteria.length : 0;
   const initial = read.ok ? read.model.criteria.map((criterion) => criterion.weight) : [];
@@ -480,7 +481,6 @@ export function Decision({ props }: { props: Props }) {
   const rankOf = new Map(ranked.map((entry, position) => [entry.index, position]));
   const leader = ranked[0].index;
   const tiedLead = (leaderMargin(ranked)?.tied.length ?? 0) > 0;
-  const frozen = questionClosed(sent, question, superseded);
   const changed = current.some((weight, index) => weight !== initial[index]);
   const hasDetails = model.options.some((option) => option.pros.length > 0 || option.cons.length > 0 || option.note !== null);
   const setWeight = (index: number, weight: number) =>
