@@ -166,7 +166,7 @@ export function sentFor(
  */
 export function useQuestionClosed(sent: readonly SentAnswer[] | null, question: string, superseded: boolean): boolean {
   const keep = useKeepUnansweredActions();
-  return (!keep && superseded) || (sent?.some((answer) => answer.question === question || answer.question === null) ?? false);
+  return (keep === false && superseded) || (sent?.some((answer) => answer.question === question || answer.question === null) ?? false);
 }
 
 /**
@@ -179,6 +179,9 @@ export const CardDepthContext = createContext(0);
 export const InTableContext = createContext(false);
 
 /** Shared reactive policy for controls and composer submission inference. */
-export function useKeepUnansweredActions(): boolean {
-  return useSettings().values?.keepUnansweredActions === true;
+export function useKeepUnansweredActions(): boolean | null {
+  const { values } = useSettings();
+  // Unknown must not close controls or irreversibly infer a submission.
+  // A cached false is not authoritative: the setting may have changed elsewhere.
+  return values === undefined ? null : values.keepUnansweredActions === true;
 }

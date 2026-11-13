@@ -61,8 +61,8 @@ const UI_ID = /^[a-z0-9]{10}$/;
 /** Thread ids kept for the code-work instruction section (see configure). */
 const MAX_PERSON_THREADS = 10_000;
 
-/** Declared here so BB lists it; the page reads it (ui/components/motion.ts). */
-export const MOTION_SETTINGS = {
+/** UI preferences declared for BB and read through reactive useSettings. */
+export const UI_SETTINGS = {
   keepUnansweredActions: {
     type: "boolean",
     label: "Keep unanswered actions available",
@@ -230,7 +230,7 @@ export const rpcContract = defineRpcContract({
 
 export default async function plugin(bb: BbPluginApi) {
   const web = createWebLookups(bb);
-  bb.settings.define(MOTION_SETTINGS);
+  bb.settings.define(UI_SETTINGS);
   /** Image searches and Wikipedia photos (Map places) for markdown renderings: the photo found, or null (none, or lookups off). */
   const findImage = {
     search: async (query: string) => {

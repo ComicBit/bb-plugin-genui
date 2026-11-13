@@ -288,7 +288,7 @@ export function useBlockAnswerTarget(
   const mode: Answers["target"] = target.kind === "gallery" ? "gallery" : block.composer ? "composer" : "direct";
   // A later user message after a draft emptied with this block's answers in it: they were sent.
   useEffect(() => {
-    if (superseded && !keep) sheet.supersede(stateKey);
+    if (superseded && keep === false) sheet.supersede(stateKey);
   }, [superseded, keep, sheet, stateKey, block]);
   const stage = useCallback(
     async (question: string, answer: { readonly text: string; readonly selection: Selection } | null) => {

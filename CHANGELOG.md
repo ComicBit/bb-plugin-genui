@@ -4,6 +4,11 @@ What changed in each version of the Generative UI plugin for BB. Update an insta
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- "Keep unanswered actions available", off by default, keeps unanswered controls available at normal opacity after later messages. Recorded submissions still close their controls. With this option enabled, older composers must expose a submission callback or an observable submitting draft clear to confirm answers; unrelated messages are not treated as submission receipts.
+
 ## [0.3.2] - 2026-11-07
 
 ### Fixed
