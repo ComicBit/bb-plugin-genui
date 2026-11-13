@@ -218,11 +218,10 @@ function PlanRow({
  * (optional ones start unchecked), their files, risks and estimates, and an
  * Approve toggle that stages the approval (the steps kept and skipped) in
  * the user's message. Changing the steps after approving updates it; changes
- * in their own words go in the composer. Once sent (or the thread moved on)
+ * in their own words go in the composer. Once sent
  * the steps stay read-only and the footer is what was sent.
  */
 export function Plan({ props }: { props: Props }) {
-  const { superseded } = useUiRuntime();
   const { staged, sent, target, stage } = useAnswers();
   const question = useContext(NodeKeyContext);
   const read = readPlan(props.steps);
@@ -233,7 +232,7 @@ export function Plan({ props }: { props: Props }) {
   const checked = steps.map((step, index) => state.toggled[String(index)] ?? !step.optional);
   const message = planMessage(steps, checked);
   const entry = staged.get(question);
-  const closed = questionClosed(sent, question, superseded);
+  const closed = questionClosed(sent, question);
   // Approved, then the steps changed: the approval follows them (none left: nothing to approve).
   useEffect(() => {
     if (closed || entry === undefined || entry.text === message) return;
@@ -456,7 +455,6 @@ function Verdict({ model, ranked }: { model: DecisionModel; ranked: readonly Ran
  * best first.
  */
 export function Decision({ props }: { props: Props }) {
-  const { superseded } = useUiRuntime();
   const { sent } = useAnswers();
   const question = useContext(NodeKeyContext);
   const read = readDecision(props.options, props.criteria);
@@ -480,7 +478,7 @@ export function Decision({ props }: { props: Props }) {
   const rankOf = new Map(ranked.map((entry, position) => [entry.index, position]));
   const leader = ranked[0].index;
   const tiedLead = (leaderMargin(ranked)?.tied.length ?? 0) > 0;
-  const frozen = questionClosed(sent, question, superseded);
+  const frozen = questionClosed(sent, question);
   const changed = current.some((weight, index) => weight !== initial[index]);
   const hasDetails = model.options.some((option) => option.pros.length > 0 || option.cons.length > 0 || option.note !== null);
   const setWeight = (index: number, weight: number) =>

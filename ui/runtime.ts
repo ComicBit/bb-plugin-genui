@@ -87,7 +87,7 @@ export interface UiRuntime {
   loadAsset: ((src: string) => Promise<AssetBytes>) | null;
   /**
    * True once the thread has a user message after the reply holding this
-   * block (typed, or sent from any UI): its choices are no longer the question.
+   * block. This is conversation activity, not evidence that a choice was answered.
    */
   superseded: boolean;
   /**
@@ -159,12 +159,11 @@ export function sentFor(
 }
 
 /**
- * Whether `question` is no longer open: it was answered, the block sent an
- * answer before answers were staged (one closed every choice), or the thread
- * moved on.
+ * Only a recorded submission closes a question. Conversation activity,
+ * including user-role system messages, is not evidence of an answer.
  */
-export function questionClosed(sent: readonly SentAnswer[] | null, question: string, superseded: boolean): boolean {
-  return superseded || (sent?.some((answer) => answer.question === question || answer.question === null) ?? false);
+export function questionClosed(sent: readonly SentAnswer[] | null, question: string): boolean {
+  return sent?.some((answer) => answer.question === question || answer.question === null) ?? false;
 }
 
 /**

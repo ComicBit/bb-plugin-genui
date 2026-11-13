@@ -207,7 +207,7 @@ export function LiveUi({
     );
     return placed === -1 ? UNPLACED : placed;
   }, []);
-  const answers = useBlockAnswerTarget(target, stateKey, superseded === true, place);
+  const answers = useBlockAnswerTarget(target, stateKey, place);
 
   const { roots, diagnostics } = useMemo(() => evaluate(program, state, data), [program, state, data]);
   // Memoized elements let React skip the tree when only a parent re-renders.
@@ -279,16 +279,11 @@ export function LiveUi({
 export function useBlockAnswerTarget(
   target: AnswerTarget,
   stateKey: string,
-  superseded: boolean,
   position: (question: string) => number,
 ): Answers {
   const sheet = target.kind === "thread" ? sheetFor(target.threadId) : GALLERY_SHEET;
   const block = useBlockAnswers(sheet, stateKey);
   const mode: Answers["target"] = target.kind === "gallery" ? "gallery" : block.composer ? "composer" : "direct";
-  // A later user message after a draft emptied with this block's answers in it: they were sent.
-  useEffect(() => {
-    if (superseded) sheet.supersede(stateKey);
-  }, [superseded, sheet, stateKey, block]);
   const stage = useCallback(
     async (question: string, answer: { readonly text: string; readonly selection: Selection } | null) => {
       if (answer === null) {

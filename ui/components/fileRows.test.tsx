@@ -65,7 +65,7 @@ afterEach(() => {
 
 /** The gallery's answer sheet, which Findings' fix buttons stage into. */
 function Answers({ children }: { children: ReactNode }) {
-  return <AnswersContext value={useBlockAnswerTarget({ kind: "gallery" }, "fileRows.test", false, () => 0)}>{children}</AnswersContext>;
+  return <AnswersContext value={useBlockAnswerTarget({ kind: "gallery" }, "fileRows.test", () => 0)}>{children}</AnswersContext>;
 }
 
 function render(component: (props: { props: Props }) => ReactNode, props: Props, canOpen = true): void {

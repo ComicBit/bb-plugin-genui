@@ -113,7 +113,6 @@ export function AppBlock({
   ready,
   stateKey,
   answers,
-  superseded = false,
 }: {
   html: string;
   /** The fence is closed: the app runs. Until then the preview draws its markup. */
@@ -122,8 +121,6 @@ export function AppBlock({
   stateKey: string;
   /** Where `genui.answer` goes; in the gallery nothing persists. */
   answers: AnswerTarget;
-  /** A later user message exists in the thread. */
-  superseded?: boolean;
 }) {
   const [previewed, setPreviewed] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -142,7 +139,6 @@ export function AppBlock({
             html={html}
             stateKey={stateKey}
             target={answers}
-            superseded={superseded}
             covered={previewing}
             onLoaded={onAppLoaded}
           />
@@ -267,14 +263,12 @@ function AppFrame({
   html,
   stateKey,
   target,
-  superseded,
   covered,
   onLoaded,
 }: {
   html: string;
   stateKey: string;
   target: AnswerTarget;
-  superseded: boolean;
   /** The preview still covers it: hidden until its document loads. */
   covered: boolean;
   onLoaded: () => void;
@@ -284,7 +278,7 @@ function AppFrame({
   const navigate = useBbNavigate();
   const motionOff = useAnimationsOff();
   const sync = useHostSync(iframeRef, motionOff);
-  const answers = useBlockAnswerTarget(target, stateKey, superseded, placeApp);
+  const answers = useBlockAnswerTarget(target, stateKey, placeApp);
   // Only a thread's apps keep their storage; the gallery's start fresh.
   const persist = target.kind === "thread";
   const [restored] = useState<AppStorageItems>(() => (persist ? readAppStorage(stateKey) : {}));

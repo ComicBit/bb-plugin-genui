@@ -127,9 +127,7 @@ function AppFence({
   actions: ThreadActions;
 }) {
   const answers = useAnswerTarget(threadId, messageId, fence, actions);
-  const superseded = useSuperseded(threadId, messageId);
-  // Null while BB's outline is read: an app's answers stay open until it says.
-  return <AppBlock html={code} ready={complete} stateKey={stateKey} answers={answers} superseded={superseded === true} />;
+  return <AppBlock html={code} ready={complete} stateKey={stateKey} answers={answers} />;
 }
 
 function UiFence({

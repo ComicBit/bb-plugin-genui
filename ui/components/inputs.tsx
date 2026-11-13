@@ -511,14 +511,13 @@ const SENT_ENTRANCE: Entrance = { keyframes: [{ opacity: 0 }, { opacity: 1 }], d
 const CHOICE_FADE_MS = 200;
 
 /**
- * Whether `question` is closed (its answer was sent, or the thread moved on)
+ * Whether `question` is closed (its answer was sent)
  * and, once its fade has run, gone. Choices closed before they mounted are
  * gone at once; ones closed on screen fade first.
  */
 export function useClosedChoices(question: string): { closed: boolean; gone: boolean } {
-  const { superseded } = useUiRuntime();
   const { sent } = useAnswers();
-  const closed = questionClosed(sent, question, superseded);
+  const closed = questionClosed(sent, question);
   const [gone, setGone] = useState(closed);
   useEffect(() => {
     if (!closed) {
@@ -549,7 +548,7 @@ function answerTexts(props: Props): string[] {
  * choice buttons (Send, or no action) are a single-select toggle: a pick
  * stages its answer in the user's message (useAnswers), picking it again
  * withdraws it, a sibling switches. Once the answer is sent they fold into
- * one line showing it, and once the thread moved on without one they leave.
+ * one line showing it. Unanswered choices stay available.
  * Other buttons (links, copies, local state) run at once and stay.
  * `question` names it where the buttons' keys are not node keys.
  */

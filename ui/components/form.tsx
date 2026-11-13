@@ -32,7 +32,7 @@ export function Form({ props }: { props: Props }) {
   const question = useContext(NodeKeyContext);
   const fields = formFields({ kind: "node", type: "Form", key: question, props });
   const message = fields.map((field) => field.line).join("\n");
-  const closed = questionClosed(sent, question, runtime.superseded);
+  const closed = questionClosed(sent, question);
   const answered = sentFor(sent, question) !== null;
   const entry = staged.get(question);
   const [sending, setSending] = useState(false);

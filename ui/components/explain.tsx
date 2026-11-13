@@ -381,7 +381,6 @@ function ListItem({ row, leading, choice }: { row: ListRow; leading: Leading; ch
 
 /** Rows; the rows that reply (a Send) are one question, a single-select whose pick goes into the user's message. */
 export function List({ props }: { props: Props }) {
-  const { superseded } = useUiRuntime();
   const { staged, sent, stage } = useAnswers();
   const question = useContext(NodeKeyContext);
   const rows = parseListRows(props.items);
@@ -395,7 +394,7 @@ export function List({ props }: { props: Props }) {
       ? "dot"
       : null;
   const replying = rows.some((row) => sentTexts(row.actions).length > 0);
-  const closed = questionClosed(sent, question, superseded);
+  const closed = questionClosed(sent, question);
   const answered = sentFor(sent, question, (text) => rows.some((row) => sentTexts(row.actions).includes(text)));
   const picked = staged.get(question)?.selection ?? null;
   return (

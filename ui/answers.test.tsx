@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { hasLaterUserMessage } from "./supersession";
 // A reply with two ```ui blocks (two React roots, as BB mounts them) against
 // a composer that keeps its draft as text plus mention ranges, like BB's.
 import { useSyncExternalStore } from "react";
@@ -359,7 +360,45 @@ describe("the composer is the answer sheet", () => {
     expect(within(block1).getByRole("status").textContent).not.toContain("Pro");
   });
 
-  it("settles the answers as sent on supersession where the composer reports no submissions", async () => {
+  it.each(["assistant followup", "synthetic user message", "genuine user followup"])(
+    "keeps unanswered buttons and forms actionable after %s",
+    async (kind) => {
+      act(() => {
+        bb.superseded = hasLaterUserMessage([
+          { id: "reply", role: "assistant" },
+          { id: kind, role: kind === "assistant followup" ? "assistant" : "user" },
+        ], "reply") === true;
+        for (const listener of [...bb.supersededListeners]) listener();
+      });
+      await wait(250);
+      fireEvent.click(within(block1).getByRole("button", { name: "Pro" }));
+      fireEvent.click(within(block2).getByRole("checkbox", { name: "CSV" }));
+      expect(fake.composer.draft.text).toContain("Pro");
+      expect(fake.composer.draft.text).toContain("CSV");
+      act(() => fake.send());
+      await wait(250);
+      expect(within(block1).queryByRole("button", { name: "Pro" })).toBeNull();
+      expect(within(block1).getByRole("status").textContent).toContain("Pro");
+      expect(within(block2).getByText("Sent")).toBeTruthy();
+      expect(fake.sent).toHaveLength(1);
+    },
+  );
+
+  it("confirms a legacy composer submission when its draft clears while submitting", async () => {
+    cleanup();
+    thread++;
+    fake = fakeComposer(`thr_${thread}`, false);
+    bb.composers = fake;
+    mountReply(`thr_${thread}`);
+    fireEvent.click(within(block1).getByRole("button", { name: "Pro" }));
+    act(() => fake.startSubmit());
+    act(() => fake.edit(() => ({ text: "" })));
+    await wait(250);
+    expect(within(block1).queryByRole("button", { name: "Pro" })).toBeNull();
+    expect(within(block1).getByRole("status").textContent).toContain("Pro");
+  });
+
+  it("does not mistake conversation activity for submission after the draft clears", async () => {
     cleanup();
     thread++;
     fake = fakeComposer(`thr_${thread}`, false);
@@ -372,8 +411,8 @@ describe("the composer is the answer sheet", () => {
     expect(pressed(block1, "Pro")).toBe("true");
     supersede();
     await wait(250);
-    expect(within(block1).getByRole("status").textContent).toContain("Pro");
-    expect(within(block2).getByText("Sent")).toBeTruthy();
+    expect(pressed(block1, "Pro")).toBe("true");
+    expect(within(block2).queryByText("Sent")).toBeNull();
   });
 
   it("writes a staged Form's last typing before a send: on leaving the field, and on Enter", () => {
