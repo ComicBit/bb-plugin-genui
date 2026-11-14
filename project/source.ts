@@ -1,9 +1,12 @@
 // Reads the reply's own thread's state from BB for Changes, Commits,
-// PullRequest and Threads, through the SDK only (never git). Every call acts
-// for one thread id: Changes, Commits and PullRequest read that thread's
-// environment; Threads lists only threads of that thread's project, and any
-// other id is "not found". Environments has its own source (environments.ts).
+// PullRequest and Threads, through the SDK only (never git); the pull request
+// comes from the built-in bb--github-pr-status plugin through the SDK's
+// callRpc. Every call acts for one thread id: Changes, Commits and
+// PullRequest read that thread's environment; Threads lists only threads of
+// that thread's project, and any other id is "not found". Environments has
+// its own source (environments.ts).
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
+import { z } from "zod";
 import {
   matchesPathFilter,
   RUNNING,
@@ -184,6 +187,55 @@ export function pullRequestInfo(pr: PullRequestEntry): PullRequestInfo {
     inMergeQueue: pr.inMergeQueue === true,
     updatedAt: Number.isFinite(updatedAt) ? updatedAt : null,
   };
+}
+
+/** BB's answer for an environment's pull request: one row of bb--github-pr-status's pullRequests. */
+export type PullRequestAnswer =
+  | { readonly outcome: "available"; readonly pullRequest: PullRequestEntry }
+  | { readonly outcome: "absent" }
+  | { readonly outcome: "unavailable"; readonly message: string };
+
+/** The built-in plugin that owns pull request status since BB dropped `environments.pullRequest`. */
+export const PULL_REQUEST_PLUGIN = "bb--github-pr-status";
+
+const pullRequestEntry = z.custom<PullRequestEntry>(
+  (value) => typeof value === "object" && value !== null && typeof (value as { number?: unknown }).number === "number",
+  "not a pull request",
+);
+const pullRequestAnswer: z.ZodType<PullRequestAnswer> = z.union([
+  z.object({ outcome: z.literal("available"), pullRequest: pullRequestEntry }),
+  z.object({ outcome: z.literal("absent") }),
+  z.object({ outcome: z.literal("unavailable"), message: z.string() }),
+]);
+const pullRequestRows = z.record(z.string(), pullRequestAnswer);
+
+type LegacyPullRequestRead = (args: { environmentId: string }) => Promise<PullRequestAnswer>;
+
+/**
+ * The pull request for an environment's current branch. BB up to 0.48 had
+ * `sdk.environments.pullRequest`; BB 0.49 dropped it and serves pull requests
+ * from the bb--github-pr-status plugin's `pullRequests` RPC.
+ */
+export async function readPullRequest(sdk: Sdk, environmentId: string): Promise<PullRequestAnswer> {
+  const legacy = (sdk.environments as { pullRequest?: LegacyPullRequestRead }).pullRequest;
+  if (typeof legacy === "function") return legacy.call(sdk.environments, { environmentId });
+  if (typeof (sdk as { plugins?: Partial<Sdk["plugins"]> }).plugins?.callRpc !== "function") {
+    return { outcome: "unavailable", message: "this version of BB can't read pull requests" };
+  }
+  try {
+    const rows = await sdk.plugins.callRpc<Record<string, PullRequestAnswer>>({
+      pluginId: PULL_REQUEST_PLUGIN,
+      method: "pullRequests",
+      input: { keys: [environmentId] },
+      outputSchema: pullRequestRows,
+    });
+    return rows[environmentId] ?? { outcome: "absent" };
+  } catch (cause) {
+    return {
+      outcome: "unavailable",
+      message: `the GitHub PR Status plugin (${PULL_REQUEST_PLUGIN}) didn't answer: ${errorMessage(cause)}`,
+    };
+  }
 }
 
 /** The thread and its environment, or why there is none. */
@@ -547,7 +599,7 @@ export function createProjectSource(bb: BbPluginApi, storage: SnapshotStorage = 
         const environment = await threadEnvironment(sdk, threadId);
         if (!environment.ok) return environment;
         const [answer, env] = await Promise.all([
-          sdk.environments.pullRequest({ environmentId: environment.environmentId }),
+          readPullRequest(sdk, environment.environmentId),
           sdk.environments.get({ environmentId: environment.environmentId }),
         ]);
         if (answer.outcome === "unavailable") return failure("unavailable", answer.message);

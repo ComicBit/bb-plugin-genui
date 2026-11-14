@@ -20,7 +20,7 @@ import {
   type EnvironmentThread,
 } from "../core/environments";
 import { RUNNING, THREAD_ID, type EnvironmentsResult, type ProjectFailure, type ThreadDisplayStatus } from "../core/project";
-import { pullRequestInfo } from "./source";
+import { pullRequestInfo, readPullRequest } from "./source";
 
 type Sdk = BbPluginApi["sdk"];
 
@@ -323,7 +323,7 @@ export function createEnvironmentsSource(sdk: Sdk): EnvironmentsSource {
 
   async function readPull(environmentId: string): Promise<EnvironmentPull> {
     try {
-      const answer = await sdk.environments.pullRequest({ environmentId });
+      const answer = await readPullRequest(sdk, environmentId);
       if (answer.outcome === "unavailable") return { ok: false, message: answer.message };
       return { ok: true, pullRequest: answer.outcome === "available" ? pullRequestInfo(answer.pullRequest) : null };
     } catch (cause) {
