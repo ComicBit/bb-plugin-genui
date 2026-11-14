@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 - PullRequest() and the pull request column of Environments() work again on BB 0.49. BB moved pull request status out of its SDK (`environments.pullRequest`) into the built-in GitHub PR Status plugin, so both showed "t.environments.pullRequest is not a function"; they now read it from that plugin's `pullRequests` RPC, and still use the old SDK call on a BB that has it. A workspace that isn't a git repository now shows no pull request instead of that error ([#39](https://github.com/ComicBit/bb-plugin-genui/issues/39)).
+- Environments() reads the pull requests of the rows it shows together, in one call, and a pull request with a field genui can't show says which field instead of breaking the row.
 
 ## [0.3.2] - 2026-11-07
 

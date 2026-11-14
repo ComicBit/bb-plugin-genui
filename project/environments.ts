@@ -20,7 +20,7 @@ import {
   type EnvironmentThread,
 } from "../core/environments";
 import { RUNNING, THREAD_ID, type EnvironmentsResult, type ProjectFailure, type ThreadDisplayStatus } from "../core/project";
-import { pullRequestInfo, readPullRequest } from "./source";
+import { createPullRequestReader, pullRequestInfo } from "./pull-requests";
 
 type Sdk = BbPluginApi["sdk"];
 
@@ -282,6 +282,7 @@ export async function mapLimit<T, R>(items: readonly T[], limit: number, work: (
 }
 
 export function createEnvironmentsSource(sdk: Sdk): EnvironmentsSource {
+  const pullRequests = createPullRequestReader(sdk);
   const projects = new Map<string, { at: number; projectId: string; environmentId: string | null }>();
 
   /** The thread's project and environment, or why there is none. */
@@ -323,7 +324,7 @@ export function createEnvironmentsSource(sdk: Sdk): EnvironmentsSource {
 
   async function readPull(environmentId: string): Promise<EnvironmentPull> {
     try {
-      const answer = await readPullRequest(sdk, environmentId);
+      const answer = await pullRequests.read(environmentId);
       if (answer.outcome === "unavailable") return { ok: false, message: answer.message };
       return { ok: true, pullRequest: answer.outcome === "available" ? pullRequestInfo(answer.pullRequest) : null };
     } catch (cause) {
