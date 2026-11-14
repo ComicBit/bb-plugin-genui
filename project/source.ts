@@ -220,7 +220,7 @@ export async function readPullRequest(sdk: Sdk, environmentId: string): Promise<
   const legacy = (sdk.environments as { pullRequest?: LegacyPullRequestRead }).pullRequest;
   if (typeof legacy === "function") return legacy.call(sdk.environments, { environmentId });
   if (typeof (sdk as { plugins?: Partial<Sdk["plugins"]> }).plugins?.callRpc !== "function") {
-    return { outcome: "unavailable", message: "this version of BB can't read pull requests" };
+    return { outcome: "unavailable", message: "This version of BB can't read pull requests" };
   }
   try {
     const rows = await sdk.plugins.callRpc<Record<string, PullRequestAnswer>>({
@@ -233,7 +233,7 @@ export async function readPullRequest(sdk: Sdk, environmentId: string): Promise<
   } catch (cause) {
     return {
       outcome: "unavailable",
-      message: `the GitHub PR Status plugin (${PULL_REQUEST_PLUGIN}) didn't answer: ${errorMessage(cause)}`,
+      message: `The GitHub PR Status plugin (${PULL_REQUEST_PLUGIN}) didn't answer: ${errorMessage(cause)}`,
     };
   }
 }

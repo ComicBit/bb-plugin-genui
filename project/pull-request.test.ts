@@ -67,7 +67,7 @@ describe("readPullRequest", () => {
     const answer = await readPullRequest(rpcSdk(new Error("plugin bb--github-pr-status is disabled")).sdk, "env_a");
     expect(answer).toEqual({
       outcome: "unavailable",
-      message: "the GitHub PR Status plugin (bb--github-pr-status) didn't answer: plugin bb--github-pr-status is disabled",
+      message: "The GitHub PR Status plugin (bb--github-pr-status) didn't answer: plugin bb--github-pr-status is disabled",
     });
   });
 
@@ -80,7 +80,7 @@ describe("readPullRequest", () => {
 
   it("says why when BB has neither way to read a pull request", async () => {
     const bare = { environments: {} } as unknown as Sdk;
-    expect(await readPullRequest(bare, "env_a")).toEqual({ outcome: "unavailable", message: "this version of BB can't read pull requests" });
+    expect(await readPullRequest(bare, "env_a")).toEqual({ outcome: "unavailable", message: "This version of BB can't read pull requests" });
   });
 });
 
