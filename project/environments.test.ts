@@ -141,9 +141,11 @@ function fakeBb(options: { status?: (environmentId: string, base: string | undef
         const branch = environments[args.environmentId]?.branchName ?? "main";
         return { outcome: "available", workspace: workspace(branch) };
       },
-      pullRequest: async (args: { environmentId: string }) => {
-        calls.push({ method: "environments.pullRequest", args });
-        return { outcome: "available", pullRequest: PULL_REQUEST };
+    },
+    plugins: {
+      callRpc: async (args: { pluginId: string; method: string; input: { keys: string[] }; outputSchema: { parse(value: unknown): unknown } }) => {
+        calls.push({ method: `${args.pluginId}.${args.method}`, args: args.input });
+        return args.outputSchema.parse(Object.fromEntries(args.input.keys.map((key) => [key, { outcome: "available", pullRequest: PULL_REQUEST }])));
       },
     },
   };
@@ -247,6 +249,7 @@ describe("environments: one environment's detail", () => {
       uncommitted: { files: 2, additions: 12, deletions: 3, complete: true },
     });
     expect(detail.pull).toMatchObject({ ok: true, pullRequest: { number: 424, state: "draft", checks: { state: "failing", failed: 1, passed: 3 } } });
+    expect(calls.find((call) => call.method === "bb--github-pr-status.pullRequests")?.args).toEqual({ keys: ["env_wt01"] });
     expect(calls.find((call) => call.method === "environments.status")?.args).toEqual({ environmentId: "env_wt01", mergeBaseBranch: "main" });
   });
 
@@ -255,7 +258,7 @@ describe("environments: one environment's detail", () => {
     const detail = (await source.environment("thr_mine00", "env_main")) as EnvironmentDetail;
     expect(detail.checkout).toMatchObject({ ok: true, onBase: true, ahead: null, behind: null });
     expect(detail.pull).toBeNull();
-    expect(calls.some((call) => call.method === "environments.pullRequest")).toBe(false);
+    expect(calls.some((call) => call.method === "bb--github-pr-status.pullRequests")).toBe(false);
   });
 
   it("says a missing workspace folder honestly", async () => {
@@ -297,8 +300,8 @@ function fakeBbWithoutBase() {
         calls.push({ method: "environments.status", args });
         return { outcome: "available", workspace: workspace("wt/env_wt01") };
       },
-      pullRequest: async () => ({ outcome: "absent" }),
     },
+    plugins: { callRpc: async () => ({}) },
   };
   return { source: createEnvironmentsSource(sdk as unknown as BbPluginApi["sdk"]), calls };
 }

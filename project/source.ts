@@ -1,8 +1,9 @@
 // Reads the reply's own thread's state from BB for Changes, Commits,
-// PullRequest and Threads, through the SDK only (never git). Every call acts
-// for one thread id: Changes, Commits and PullRequest read that thread's
-// environment; Threads lists only threads of that thread's project, and any
-// other id is "not found". Environments has its own source (environments.ts).
+// PullRequest and Threads, through the SDK only (never git); pull requests
+// come through pull-requests.ts. Every call acts for one thread id: Changes,
+// Commits and PullRequest read that thread's environment; Threads lists only
+// threads of that thread's project, and any other id is "not found".
+// Environments has its own source (environments.ts).
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import {
   matchesPathFilter,
@@ -22,7 +23,6 @@ import {
   type ProjectFailure,
   type ProjectRequest,
   type ProjectResult,
-  type PullRequestInfo,
   type PullRequestResult,
   type ThreadDisplayStatus,
   type ThreadInfo,
@@ -30,6 +30,7 @@ import {
 } from "../core/project";
 import { lastMessage, pendingAsk, workersByParent, type LastMessage } from "../core/thread-activity";
 import type { EnvironmentsSource } from "./environments";
+import { createPullRequestReader, pullRequestInfo } from "./pull-requests";
 import { createSnapshots, fitChanges, PATCH_BYTES, SNAPSHOT_BYTES, snapshotKey, type SnapshotStorage } from "./snapshots";
 
 /** Keep what is shown in this reply block (`blockKey`), or replace what was kept (`refresh`). */
@@ -139,53 +140,6 @@ export function changedFile(file: DiffFileEntry, inline: boolean): ChangedFile {
   };
 }
 
-interface PullRequestEntry {
-  readonly number: number;
-  readonly title: string;
-  readonly url: string;
-  readonly state: PullRequestInfo["state"];
-  readonly baseRefName: string;
-  readonly headRefName: string;
-  readonly checks: {
-    readonly state: PullRequestInfo["checks"]["state"];
-    readonly passedCount: number;
-    readonly failedCount: number;
-    readonly pendingCount: number;
-    readonly totalCount: number;
-  };
-  readonly review: { readonly state: PullRequestInfo["review"]["state"]; readonly reviewRequestCount: number };
-  readonly mergeability: { readonly state: PullRequestInfo["mergeability"] };
-  readonly attention: PullRequestInfo["attention"];
-  readonly autoMerge: boolean;
-  readonly inMergeQueue: boolean | null;
-  readonly updatedAt: string;
-}
-
-export function pullRequestInfo(pr: PullRequestEntry): PullRequestInfo {
-  const updatedAt = Date.parse(pr.updatedAt);
-  return {
-    number: pr.number,
-    title: pr.title,
-    url: pr.url,
-    state: pr.state,
-    baseRef: pr.baseRefName,
-    headRef: pr.headRefName,
-    checks: {
-      state: pr.checks.state,
-      passed: pr.checks.passedCount,
-      failed: pr.checks.failedCount,
-      pending: pr.checks.pendingCount,
-      total: pr.checks.totalCount,
-    },
-    review: { state: pr.review.state, requests: pr.review.reviewRequestCount },
-    mergeability: pr.mergeability.state,
-    attention: pr.attention,
-    autoMerge: pr.autoMerge,
-    inMergeQueue: pr.inMergeQueue === true,
-    updatedAt: Number.isFinite(updatedAt) ? updatedAt : null,
-  };
-}
-
 /** The thread and its environment, or why there is none. */
 async function threadEnvironment(
   sdk: Sdk,
@@ -268,6 +222,7 @@ function patchTarget(query: DiffQuery) {
 
 export function createProjectSource(bb: BbPluginApi, storage: SnapshotStorage = bb.storage.kv): ProjectSource {
   const sdk = bb.sdk;
+  const pullRequests = createPullRequestReader(sdk);
   const snapshots = createSnapshots(storage);
 
   /** The diff query for a thread's target, with the environment it runs in. */
@@ -547,7 +502,7 @@ export function createProjectSource(bb: BbPluginApi, storage: SnapshotStorage = 
         const environment = await threadEnvironment(sdk, threadId);
         if (!environment.ok) return environment;
         const [answer, env] = await Promise.all([
-          sdk.environments.pullRequest({ environmentId: environment.environmentId }),
+          pullRequests.read(environment.environmentId),
           sdk.environments.get({ environmentId: environment.environmentId }),
         ]);
         if (answer.outcome === "unavailable") return failure("unavailable", answer.message);
