@@ -6,7 +6,7 @@
 // since it reads the thread from the server, not the DOM.
 import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import { useSdk, type PluginBrowserBbSdk as Sdk } from "@get-bb/plugin-sdk/app";
-import { affectsConversation, hasLaterUserMessage, type OutlineItem } from "./supersession";
+import { affectsConversation, hasLaterUserMessage, isAutomatedPreview, type OutlineItem } from "./supersession";
 
 /** Coalesces the burst of events a send produces into one read. */
 const REFRESH_DELAY_MS = 150;
@@ -111,7 +111,9 @@ class ThreadOutlines {
       .conversationOutline({ threadId, signal: entry.abort.signal })
       .then(
         ({ items }) => {
-          entry.items = items.map(({ id, role }) => ({ id, role }));
+          entry.items = items.map(({ id, role, preview }) =>
+            role === "user" && isAutomatedPreview(preview) ? { id, role, automated: true } : { id, role },
+          );
           for (const listener of entry.listeners) listener();
         },
         // A failed read keeps the last outline; the next change reads again. Without one,

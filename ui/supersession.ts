@@ -5,6 +5,27 @@
 export interface OutlineItem {
   readonly id: string;
   readonly role: "assistant" | "user";
+  /**
+   * True for a user-role row BB wrote itself rather than the person: a
+   * `[bb system]` notice (a subthread finished or needs help, bb restarted,
+   * ownership changed) or a `[bb message from thread:…]` from another agent.
+   */
+  readonly automated?: boolean;
+}
+
+/**
+ * The envelopes BB puts at the start of the user-role messages it injects
+ * (its `systemMessage*` and `agentThreadMessage` templates). The outline
+ * preview keeps them, with whitespace collapsed.
+ */
+const AUTOMATED_PREFIX = /^\[bb (?:system\]|message from thread:)/;
+
+/**
+ * Whether an outline preview is a message BB injected, not one the person
+ * sent. A missing preview (an older BB) counts as the person's.
+ */
+export function isAutomatedPreview(preview: string | undefined): boolean {
+  return typeof preview === "string" && AUTOMATED_PREFIX.test(preview.trimStart());
 }
 
 /** A user row's event sequence, from its `<thread>:user-seed:<seq>` id; null for any other id. */
@@ -21,6 +42,10 @@ function userSeq(id: string): number | null {
  *
  * A user row whose sequence is below one already seen is out of place, not a
  * reply: BB's outline can list a rejected steer, sent long before, at its end.
+ *
+ * An automated row (a subthread's completion notice, another agent's message)
+ * is not an answer either: the person may not have seen the question yet.
+ * It still counts for the sequence check.
  */
 export function hasLaterUserMessage(items: readonly OutlineItem[] | null, anchorId: string): boolean | null {
   if (items === null) return null;
@@ -31,7 +56,7 @@ export function hasLaterUserMessage(items: readonly OutlineItem[] | null, anchor
     if (item.role !== "user") continue;
     const seq = userSeq(item.id);
     if (seq !== null && seq < highest) continue;
-    if (index > anchor) return true;
+    if (index > anchor && item.automated !== true) return true;
     if (seq !== null) highest = seq;
   }
   return false;

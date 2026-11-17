@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { affectsConversation, hasLaterUserMessage, type OutlineItem } from "./supersession";
+import { affectsConversation, hasLaterUserMessage, isAutomatedPreview, type OutlineItem } from "./supersession";
 
 // Ids as BB's conversation outline and timeline rows write them.
 const ASK = "thr_a:assistant:kind:assistant|turn:t12|parent:root|item:i20";
@@ -39,6 +39,19 @@ describe("hasLaterUserMessage", () => {
     expect(hasLaterUserMessage([...OUTLINE, stale, { id: "thr_a:user-seed:50", role: "user" }], LATEST)).toBe(true);
   });
 
+  it("keeps the question open after messages BB injected, like a subthread finishing", () => {
+    const notice: OutlineItem = { id: "thr_a:user-seed:45", role: "user", automated: true };
+    const agent: OutlineItem = { id: "thr_a:user-seed:46", role: "user", automated: true };
+    const reply: OutlineItem = { id: "thr_a:assistant:kind:assistant|turn:t22|parent:root|item:i50", role: "assistant" };
+    expect(hasLaterUserMessage([...OUTLINE, notice, reply, agent], LATEST)).toBe(false);
+    expect(hasLaterUserMessage([...OUTLINE, notice, reply, { id: "thr_a:user-seed:60", role: "user" }], LATEST)).toBe(true);
+  });
+
+  it("still skips an out-of-sequence row listed after an injected message", () => {
+    const notice: OutlineItem = { id: "thr_a:user-seed:45", role: "user", automated: true };
+    expect(hasLaterUserMessage([...OUTLINE, notice, { id: "thr_a:user-seed:30", role: "user" }], LATEST)).toBe(false);
+  });
+
   it("is unknown when the outline is not loaded or lacks the reply", () => {
     expect(hasLaterUserMessage(null, ASK)).toBeNull();
     expect(hasLaterUserMessage(OUTLINE, "thr_a:assistant:nested")).toBeNull();
@@ -65,5 +78,22 @@ describe("affectsConversation", () => {
 
   it("skips changes that leave the messages alone", () => {
     expect(affectsConversation({ changes: ["status-changed", "title-changed", "read-state-changed"] })).toBe(false);
+  });
+});
+
+describe("isAutomatedPreview", () => {
+  it("recognises BB's system notices and agent messages", () => {
+    expect(isAutomatedPreview("[bb system] @thread:thr_child42 completed: Nothing more to do here")).toBe(true);
+    expect(isAutomatedPreview("[bb system] bb restarted while you were running `pnpm test`.")).toBe(true);
+    expect(isAutomatedPreview("[bb message from thread:thr_abc123] The draft is ready")).toBe(true);
+    expect(isAutomatedPreview("[bb message from thread:thr_abc123;reply=x] Done")).toBe(true);
+  });
+
+  it("leaves the person's own messages alone", () => {
+    expect(isAutomatedPreview("Reply to the vendor: send option (a)")).toBe(false);
+    expect(isAutomatedPreview("Why did [bb system] show up here?")).toBe(false);
+    expect(isAutomatedPreview("[Board] Run this task with an agent")).toBe(false);
+    expect(isAutomatedPreview("")).toBe(false);
+    expect(isAutomatedPreview(undefined)).toBe(false);
   });
 });
