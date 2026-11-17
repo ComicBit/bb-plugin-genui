@@ -4,6 +4,11 @@ What changed in each version of the Generative UI plugin for BB. Update an insta
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- A question stays open when BB, not you, adds a message after it. Subthread completion notices (`[bb system] @thread:… completed`), bb restart notices and messages from other agents (`[bb message from thread:…]`) enter the thread as user-role messages, so the choices above them were locked before you could answer. Only a message you send now closes them.
+
 ## [0.3.2] - 2026-11-07
 
 ### Fixed
