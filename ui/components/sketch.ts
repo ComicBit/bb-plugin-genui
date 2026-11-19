@@ -45,8 +45,11 @@ export function sketchPalette(dark: boolean): SketchPalette {
 /** One seed, so every render of the same diagram draws the same wobble. */
 const SEED = 7;
 
-/** `backdrop` is the colour the diagram is drawn on; edge labels are cut out of the lines with it. */
-function frontmatter(colors: SketchPalette, backdrop: string): string {
+/**
+ * `backdrop` is the colour the diagram is drawn on; edge labels are cut out of the lines with it.
+ * `topToBottom` makes subgraphs that set no direction follow the flowchart's.
+ */
+function frontmatter(colors: SketchPalette, backdrop: string, topToBottom: boolean): string {
   const variables: Record<string, string> = {
     fontFamily: SKETCH_FONT_FAMILY,
     fontSize: "17px",
@@ -86,6 +89,11 @@ function frontmatter(colors: SketchPalette, backdrop: string): string {
     "  look: handDrawn",
     `  handDrawnSeed: ${SEED}`,
     "  theme: base",
+    // Mermaid's dagre layout turns a subgraph that no edge leaves to LR in a TB
+    // flowchart, and such subgraphs sit side by side: two flows compared in two
+    // subgraphs become one strip too wide to read. Only TB is changed, so LR
+    // flowcharts keep their subgraphs top to bottom.
+    ...(topToBottom ? ["  flowchart:", "    inheritDir: true"] : []),
     "  darkMode: false",
     `  fontFamily: "${SKETCH_FONT_FAMILY}"`,
     "  themeVariables:",
@@ -115,6 +123,13 @@ const NODE_START = /^([A-Za-z_][\w-]*)\s*(\{\{|\{|\[\(|\(\(\(|\(\(|>)?/;
 
 function isFlowchart(source: string): boolean {
   return /^\s*(flowchart|graph)\b/.test(source);
+}
+
+/** A flowchart that lays out top to bottom: TB, TD or no direction, after any comment lines. */
+function isTopToBottomFlowchart(source: string): boolean {
+  const header = source.split("\n").find((line) => line.trim() !== "" && !/^\s*%%/.test(line)) ?? "";
+  const match = /^\s*(?:flowchart|graph)(?![\w-])\s*(\w*)/.exec(header);
+  return match !== null && ["", "TB", "TD"].includes(match[1] ?? "");
 }
 
 /** The model set its own look: front matter or an init directive. */
@@ -155,11 +170,12 @@ export function shapeClassLines(source: string, colors: SketchPalette = LIGHT): 
  * matter or init directive keeps it untouched; one with its own class or style
  * lines keeps its colours but still gets the hand-drawn look. The diagram has
  * no canvas of its own: it is drawn on `backdrop`, Excalidraw's canvas colour
- * if none is given.
+ * if none is given. Subgraphs of a top-to-bottom flowchart stay top to bottom
+ * unless they set their own direction.
  */
 export function sketchMermaid(source: string, dark = false, backdrop?: string): string {
   const trimmed = source.trim();
   if (hasOwnStyling(trimmed)) return trimmed;
   const colors = sketchPalette(dark);
-  return [frontmatter(colors, backdrop ?? colors.canvas), trimmed, ...shapeClassLines(trimmed, colors)].join("\n");
+  return [frontmatter(colors, backdrop ?? colors.canvas, isTopToBottomFlowchart(trimmed)), trimmed, ...shapeClassLines(trimmed, colors)].join("\n");
 }

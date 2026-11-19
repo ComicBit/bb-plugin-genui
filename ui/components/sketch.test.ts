@@ -38,6 +38,37 @@ describe("sketchMermaid", () => {
   });
 });
 
+describe("sketchMermaid subgraph direction", () => {
+  const INHERIT = "  flowchart:\n    inheritDir: true\n";
+  const frontMatter = (out: string) => out.slice(0, out.indexOf("\n---\n") + 5);
+  const body = (out: string) => out.slice(out.indexOf("\n---\n") + 5);
+
+  // Mermaid's dagre layout turns a subgraph that no edge leaves to LR in a TB
+  // flowchart; inheritDir keeps it TB.
+  it("makes subgraphs of a top-to-bottom flowchart follow its direction", () => {
+    for (const header of ["flowchart TB", "graph TD", "flowchart", "%% two flows\nflowchart TB"]) {
+      expect(frontMatter(sketchMermaid(`${header}\n  subgraph s\n    a --> b\n  end`))).toContain(INHERIT);
+    }
+    expect(frontMatter(sketchMermaid("flowchart TB; subgraph S; a --> b; end"))).toContain(INHERIT);
+  });
+
+  it("leaves the diagram's own text alone", () => {
+    const source = 'flowchart TB\na["first\nsubgraph fake\nend\nlast"]';
+    expect(body(sketchMermaid(source))).toBe(source);
+  });
+
+  it("keeps Mermaid's subgraph layout for other directions and diagram types", () => {
+    for (const source of [
+      "flowchart LR\n  subgraph s\n    a --> b\n  end",
+      "flowchart BT\n  subgraph s\n    a --> b\n  end",
+      "flowchart-elk TD\n  a --> b",
+      "stateDiagram-v2\n  state s {\n    a --> b\n  }",
+    ]) {
+      expect(sketchMermaid(source)).not.toContain("inheritDir");
+    }
+  });
+});
+
 describe("shapeClassLines", () => {
   it("colours decisions, stores, terminals and events by shape", () => {
     const lines = shapeClassLines(

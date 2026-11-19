@@ -4,6 +4,11 @@ What changed in each version of the Generative UI plugin for BB. Update an insta
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- A top-to-bottom `Diagram` with subgraphs stays top to bottom. In a TB flowchart, Mermaid's dagre layout turns a subgraph that no edge leaves to left to right and puts such subgraphs side by side, so a diagram comparing two flows came out as one wide strip with text too small to read. Top-to-bottom flowcharts are now drawn with Mermaid's `flowchart.inheritDir`, so their subgraphs follow the flowchart's direction unless they set their own. Diagrams that bring their own front matter or init directive are unchanged.
+
 ## [0.3.2] - 2026-11-07
 
 ### Fixed
