@@ -3,8 +3,10 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type * as PluginSdkApp from "@get-bb/plugin-sdk/app";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ReplySource } from "../FrameFooter";
 import { UiRuntimeContext, type UiRuntime } from "../runtime";
 import { Code, Diff } from "./code";
+import { CodeExcerpt } from "./codeHealthKit";
 
 vi.mock("@get-bb/plugin-sdk/app", async (importOriginal) => ({
   ...(await importOriginal<typeof PluginSdkApp>()),
@@ -30,20 +32,23 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function show(block: "code" | "diff"): void {
-  act(() =>
-    root.render(
-      <UiRuntimeContext.Provider value={runtime}>
-        {block === "code" ? <Code props={{ code: "const a = 1;", language: "ts" }} /> : <Diff props={{ patch: PATCH }} />}
-      </UiRuntimeContext.Provider>,
-    ),
-  );
+const LONG_LINE = "  return clampView({ x: (minX + maxX) / 2, y: (minY + maxY) / 2 }, size); // long enough to need wrapping";
+
+function show(block: "code" | "diff" | "excerpt"): void {
+  const shown = {
+    code: <Code props={{ code: "const a = 1;", language: "ts" }} />,
+    diff: <Diff props={{ patch: PATCH }} />,
+    excerpt: <CodeExcerpt path="src/map.ts" file={{ ok: true, text: `const a = 1;\n${LONG_LINE}\n` }} mark={{ start: 2, end: 2 }} tone="bad" />,
+  }[block];
+  act(() => root.render(<UiRuntimeContext.Provider value={runtime}>{shown}</UiRuntimeContext.Provider>));
 }
 
-const viewerOverflow = () => container.querySelector("pre")?.dataset.overflow;
+const excerptLine = () => [...container.querySelectorAll("span")].find((span) => span.textContent === LONG_LINE)!;
+const excerptOverflow = () => (excerptLine().className.includes("whitespace-pre-wrap") ? "wrap" : "scroll");
+const viewerOverflow = () => container.querySelector("pre")?.dataset.overflow ?? excerptOverflow();
 const wrapButton = () => container.querySelector<HTMLButtonElement>('button[aria-label="Wrap lines"]')!;
 
-describe.each(["code", "diff"] as const)("Wrap lines in a %s block", (block) => {
+describe.each(["code", "diff", "excerpt"] as const)("Wrap lines in a %s block", (block) => {
   it("scrolls long lines until the user turns wrapping on, and back off", () => {
     show(block);
     expect(viewerOverflow()).toBe("scroll");
@@ -64,5 +69,17 @@ describe.each(["code", "diff"] as const)("Wrap lines in a %s block", (block) => 
     root = createRoot(container);
     show(block);
     expect(viewerOverflow()).toBe("wrap");
+  });
+});
+
+describe("Wrap lines in a reply's source panel", () => {
+  it("wraps the spec's long lines while the panel is open", () => {
+    act(() => root.render(<ReplySource source={`Text("${"long ".repeat(40)}")`} language="ui" files={[]} diagnostics={[]} />));
+    act(() => [...container.querySelectorAll("button")].find((button) => button.textContent === "Source")!.click());
+    expect(viewerOverflow()).toBe("scroll");
+
+    act(() => wrapButton().click());
+    expect(viewerOverflow()).toBe("wrap");
+    expect(wrapButton().getAttribute("aria-pressed")).toBe("true");
   });
 });

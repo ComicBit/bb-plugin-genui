@@ -10,7 +10,8 @@ import { toast } from "sonner";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import type { Diagnostic } from "../core/types";
-import { SourceView, viewerPath } from "./components/code";
+import type { CodeOverflowMode } from "@get-bb/plugin-sdk/app";
+import { SourceView, viewerPath, WrapButton } from "./components/code";
 
 /** A file the spec reads with Load or Snippet, as the source panel lists it. */
 export interface SourceFile {
@@ -88,6 +89,12 @@ const ACTION = cn(
 );
 const ACTION_LABEL = "sr-only @lg:not-sr-only";
 
+/** The icon actions in a reply's source panel header. */
+const PANEL_ACTION = cn(
+  "inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-state-hover hover:text-foreground",
+  FOCUS,
+);
+
 /**
  * The gallery's footer under one example: what it is on the left, Source,
  * Copy, Markdown and Open on the right. Its height never changes; Source
@@ -111,6 +118,7 @@ export function GalleryFooter({
   markdown?: () => string;
 }) {
   const [open, setOpen] = useState(false);
+  const [overflow, setOverflow] = useState<CodeOverflowMode>("scroll");
   const panelId = useId();
   const { copied, copy } = useCopy(() => source, SOURCE_COPY);
   return (
@@ -149,6 +157,7 @@ export function GalleryFooter({
             <Icon name="Code" aria-hidden className="size-3.5" />
             <span className={ACTION_LABEL}>Source</span>
           </button>
+          {open ? <WrapButton overflow={overflow} onChange={setOverflow} className={ACTION} /> : null}
           <button type="button" title="Copy the source" onClick={copy} className={ACTION}>
             <Icon name={copied ? "Check" : "Copy"} aria-hidden className="size-3.5" />
             <span className={ACTION_LABEL}>Copy</span>
@@ -170,6 +179,7 @@ export function GalleryFooter({
           language={language}
           files={files}
           diagnostics={diagnostics}
+          overflow={overflow}
         />
       ) : null}
     </div>
@@ -219,6 +229,7 @@ export function ReplySource({
   markdown?: () => string;
 }) {
   const [open, setOpen] = useState(false);
+  const [overflow, setOverflow] = useState<CodeOverflowMode>("scroll");
   const panelId = useId();
   const { copied, copy } = useCopy(() => source, SOURCE_COPY);
   const lines = source.replace(/\n$/, "").split("\n").length;
@@ -250,18 +261,12 @@ export function ReplySource({
                 {lines} {lines === 1 ? "line" : "lines"}
               </span>
             </span>
-            <button
-              type="button"
-              aria-label="Copy the source"
-              title="Copy the source"
-              onClick={copy}
-              className={cn(
-                "inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground transition-colors duration-150 hover:bg-state-hover hover:text-foreground",
-                FOCUS,
-              )}
-            >
-              <Icon name={copied ? "Check" : "Copy"} aria-hidden className="size-3.5" />
-            </button>
+            <span className="flex shrink-0 items-center gap-0.5">
+              <WrapButton overflow={overflow} onChange={setOverflow} className={PANEL_ACTION} />
+              <button type="button" aria-label="Copy the source" title="Copy the source" onClick={copy} className={PANEL_ACTION}>
+                <Icon name={copied ? "Check" : "Copy"} aria-hidden className="size-3.5" />
+              </button>
+            </span>
           </div>
           <SourceBody
             id={panelId}
@@ -270,6 +275,7 @@ export function ReplySource({
             language={language}
             files={files}
             diagnostics={diagnostics}
+            overflow={overflow}
           />
         </div>
       ) : null}
@@ -301,6 +307,7 @@ function SourceBody({
   language,
   files,
   diagnostics,
+  overflow,
 }: {
   id: string;
   name: string;
@@ -308,6 +315,7 @@ function SourceBody({
   language: SourceLanguage;
   files: readonly SourceFile[];
   diagnostics: readonly Diagnostic[];
+  overflow: CodeOverflowMode;
 }) {
   // BB's viewer picks its highlighting by extension and has none for .ui; the
   // spec language is JavaScript-shaped, so its calls, strings and lambdas read right that way.
@@ -315,7 +323,7 @@ function SourceBody({
   return (
     <div id={id} role="region" aria-label={`Source of ${name}`} className="border-t border-border">
       <div className="max-h-80 overflow-auto text-xs">
-        <SourceView content={source} path={viewerPath(viewerName, source)} />
+        <SourceView content={source} path={viewerPath(viewerName, source)} overflow={overflow} />
       </div>
       {files.length === 0 && diagnostics.length === 0 ? null : (
         <dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2.5 border-t border-border px-3 py-2.5 text-[11px] leading-4">
