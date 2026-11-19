@@ -3,7 +3,7 @@
 // showed is kept per block, so an old reply keeps meaning what it meant; a
 // commit's changes never change and are read live.
 import { useId, useState, type ReactNode } from "react";
-import { experimental_Diff as HostDiff, useRpc } from "@get-bb/plugin-sdk/app";
+import { type CodeOverflowMode, experimental_Diff as HostDiff, useRpc } from "@get-bb/plugin-sdk/app";
 import { toast } from "sonner";
 import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
@@ -25,7 +25,9 @@ import {
 } from "../../core/project";
 import type { rpcContract } from "../../server";
 import { useUiRuntime } from "../runtime";
+import { propsKey } from "../usePersistedState";
 import { formatNumber, TONE_PILL, type Props, type Tone } from "../values";
+import { useLineWrap, WrapButton } from "./code";
 import { ErrorLine } from "./display";
 import { FOCUS_RING } from "./inputs";
 import { RISE, SMOOTH_HEIGHT_CLASS, useEntrance, useSmoothHeight } from "./motion";
@@ -344,6 +346,7 @@ function FileRow({
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   if (open && !mounted) setMounted(true);
+  const [overflow, setOverflow] = useLineWrap(`changes:${propsKey([target, file.path])}`);
   const { directory, name } = splitPath(file.path);
   const counted = file.diff !== "binary";
   return (
@@ -389,6 +392,13 @@ function FileRow({
             <span className="shrink-0 text-[11px] text-muted-foreground">binary</span>
           )}
         </button>
+        {open && file.diff !== "binary" && file.diff !== "too-large" ? (
+          <WrapButton
+            overflow={overflow}
+            onChange={setOverflow}
+            className={cn(ICON_BUTTON, "opacity-70 group-hover/file:opacity-100 focus-visible:opacity-100")}
+          />
+        ) : null}
         {openFile === null || file.kind === "deleted" ? null : (
           <button
             type="button"
@@ -404,7 +414,9 @@ function FileRow({
         )}
       </div>
       <div id={`${id}-diff`} role="region" aria-label={`Diff of ${file.path}`} hidden={!open} className={open ? "block" : "hidden"}>
-        {mounted ? <FileDiff threadId={threadId} target={target} file={file} patch={patch} livePatches={livePatches} stored={stored} /> : null}
+        {mounted ? (
+          <FileDiff threadId={threadId} target={target} file={file} patch={patch} livePatches={livePatches} stored={stored} overflow={overflow} />
+        ) : null}
       </div>
     </li>
   );
@@ -421,6 +433,7 @@ function FileDiff({
   patch,
   livePatches,
   stored,
+  overflow,
 }: {
   threadId: string;
   target: ChangesTarget;
@@ -428,10 +441,11 @@ function FileDiff({
   patch: FilePatch | null;
   livePatches: boolean;
   stored: boolean;
+  overflow: CodeOverflowMode;
 }) {
   if (file.diff === "binary") return <DiffNote icon="File">Binary file: there is no text diff to show.</DiffNote>;
   if (file.diff === "too-large") return <DiffNote icon="Info">BB doesn't show this diff: the file is too large.</DiffNote>;
-  if (patch !== null) return <PatchView patch={patch} />;
+  if (patch !== null) return <PatchView patch={patch} overflow={overflow} />;
   if (!livePatches) {
     return (
       <DiffNote icon="Info">
@@ -439,7 +453,7 @@ function FileDiff({
       </DiffNote>
     );
   }
-  return <LivePatch threadId={threadId} target={target} path={file.path} />;
+  return <LivePatch threadId={threadId} target={target} path={file.path} overflow={overflow} />;
 }
 
 function DiffNote({ icon, children }: { icon: string; children: ReactNode }) {
@@ -452,19 +466,19 @@ function DiffNote({ icon, children }: { icon: string; children: ReactNode }) {
   );
 }
 
-function PatchView({ patch }: { patch: FilePatch }) {
+function PatchView({ patch, overflow }: { patch: FilePatch; overflow: CodeOverflowMode }) {
   if (patch.patch.trim() === "") return <DiffNote icon="Info">No line changes: only the file's mode or name changed.</DiffNote>;
   return (
     <>
       <DiffFrame>
-        <HostDiff patch={patch.patch} path={patch.path} overflow="scroll" />
+        <HostDiff patch={patch.patch} path={patch.path} overflow={overflow} />
       </DiffFrame>
       {patch.truncated ? <DiffNote icon="Info">BB shortened this diff; open the file for all of it.</DiffNote> : null}
     </>
   );
 }
 
-function LivePatch({ threadId, target, path }: { threadId: string; target: ChangesTarget; path: string }) {
+function LivePatch({ threadId, target, path, overflow }: { threadId: string; target: ChangesTarget; path: string; overflow: CodeOverflowMode }) {
   const rpc = useRpc<typeof rpcContract>();
   const { query } = useProjectQuery<PatchesResult>(`patch\0${threadId}\0${JSON.stringify(target)}\0${path}`, () =>
     rpc.call("project_patches", { threadId, target: wireTarget(target), paths: [path] }),
@@ -473,5 +487,5 @@ function LivePatch({ threadId, target, path }: { threadId: string; target: Chang
   const answer = query.answer;
   if (!answer.ok) return <DiffNote icon="AlertCircle">{answer.message}</DiffNote>;
   const patch = answer.patches.find((candidate) => candidate.path === path);
-  return patch === undefined ? <DiffNote icon="Info">BB has no diff for this file any more.</DiffNote> : <PatchView patch={patch} />;
+  return patch === undefined ? <DiffNote icon="Info">BB has no diff for this file any more.</DiffNote> : <PatchView patch={patch} overflow={overflow} />;
 }

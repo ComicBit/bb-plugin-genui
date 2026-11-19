@@ -9,7 +9,9 @@ import { Icon } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import { displayPath, workspacePath } from "../../core/test-results";
 import { useUiRuntime, type TextFile } from "../runtime";
+import { propsKey } from "../usePersistedState";
 import { formatNumber } from "../values";
+import { useLineWrap, WrapButton } from "./code";
 import { FOCUS_RING } from "./inputs";
 import { SMOOTH_HEIGHT_CLASS, useSmoothHeight } from "./motion";
 import { ICON_BUTTON } from "./projectKit";
@@ -254,6 +256,8 @@ export function CodeExcerpt({
   const shownPath = useShownPath()(path);
   const marked = mark.end - mark.start + 1;
   const range = mark.start === mark.end ? `L${mark.start}` : `L${mark.start}–${mark.end}`;
+  const [overflow, setOverflow] = useLineWrap(`excerpt:${propsKey([path, mark.start, mark.end])}`);
+  const wrap = overflow === "wrap";
   const frame = (body: ReactNode, caption: ReactNode = range) => (
     <div className="min-w-0 overflow-hidden rounded-lg border border-border bg-background">
       <div className="flex h-7 items-center justify-between gap-3 border-b border-border bg-surface-recessed pl-3 pr-1 text-[11px] text-muted-foreground">
@@ -263,7 +267,10 @@ export function CodeExcerpt({
           </span>
           <span className="shrink-0 tabular-nums">{caption}</span>
         </span>
-        <OpenFileButton path={path} line={mark.start} />
+        <span className="flex shrink-0 items-center gap-0.5">
+          {file === null ? null : <WrapButton overflow={overflow} onChange={setOverflow} />}
+          <OpenFileButton path={path} line={mark.start} />
+        </span>
       </div>
       {body}
     </div>
@@ -282,7 +289,7 @@ export function CodeExcerpt({
             Couldn't show {shownPath}:{mark.start}: {file.error}
           </span>
         </p>
-        {snippet === null ? null : frame(<ExcerptLines lines={snippet.replace(/\n$/, "").split("\n")} first={mark.start} mark={mark} tone={tone} />)}
+        {snippet === null ? null : frame(<ExcerptLines lines={snippet.replace(/\n$/, "").split("\n")} first={mark.start} mark={mark} tone={tone} wrap={wrap} />)}
       </div>
     );
   }
@@ -300,7 +307,7 @@ export function CodeExcerpt({
   const hidden = cut ? mark.end - to : 0;
   return frame(
     <>
-      <ExcerptLines lines={all.slice(from - 1, to)} first={from} mark={mark} tone={tone} />
+      <ExcerptLines lines={all.slice(from - 1, to)} first={from} mark={mark} tone={tone} wrap={wrap} />
       {hidden > 0 ? (
         <p className="m-0 border-t border-border/60 px-3 py-1 text-[11px] leading-5 text-muted-foreground">
           {formatNumber(hidden)} more marked {hidden === 1 ? "line" : "lines"} to line {formatNumber(mark.end)}
@@ -310,11 +317,23 @@ export function CodeExcerpt({
   );
 }
 
-function ExcerptLines({ lines, first, mark, tone }: { lines: readonly string[]; first: number; mark: ExcerptMark; tone: MarkTone }) {
+function ExcerptLines({
+  lines,
+  first,
+  mark,
+  tone,
+  wrap,
+}: {
+  lines: readonly string[];
+  first: number;
+  mark: ExcerptMark;
+  tone: MarkTone;
+  wrap: boolean;
+}) {
   const width = String(first + lines.length - 1).length;
   return (
     <div className="max-h-[26rem] overflow-auto py-1.5 font-mono text-[11.5px] leading-5 [tab-size:2]">
-      <div className="min-w-max">
+      <div className={wrap ? "min-w-0" : "min-w-max"}>
         {lines.map((text, index) => {
           const number = first + index;
           const inRange = number >= mark.start && number <= mark.end;
@@ -335,7 +354,7 @@ function ExcerptLines({ lines, first, mark, tone }: { lines: readonly string[]; 
                 {number}
                 {marked ? <span className="sr-only"> (marked)</span> : null}
               </span>
-              <span className={cn("whitespace-pre pr-4", marked ? "text-foreground" : "text-foreground/80")}>
+              <span className={cn(wrap ? "min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]" : "whitespace-pre", "pr-4", marked ? "text-foreground" : "text-foreground/80")}>
                 {span === null ? (
                   text === "" ? " " : text
                 ) : (
