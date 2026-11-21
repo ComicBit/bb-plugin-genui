@@ -1,9 +1,10 @@
 // bb-plugin-genui backend. Agents write ```ui and ```app blocks straight into
 // their replies, so a UI costs no extra model call. The backend:
-// - decides which sessions are told about the blocks, in three sections: the
-//   language reference (the instructions of the optional check_ui and
-//   ui_examples tools, which let an agent verify a block or see working
-//   examples first) and the rules with worked examples (configure instructions),
+// - decides which sessions are told about the blocks: behind the
+//   `automaticInstructions` setting (on by default), sends the language
+//   reference, code-work guide, and rules with worked examples; when off,
+//   exposes the bundled `/ui` skill so sessions opt in on demand. The optional
+//   `check_ui` and `ui_examples` tools stay available either way,
 // - loads the files specs reference with Load(path) and Snippet(path), and
 //   the images Image(path) shows,
 // - renders replies as plain markdown for clients that don't run the UI
@@ -68,6 +69,17 @@ export const MOTION_SETTINGS = {
     label: "Animations",
     description:
       "Lets inline UI move: text fades in, rows and cards rise into place, charts draw, sections glide open, maps and carousels scroll smoothly, and 3D scenes and shaders play. Off, nothing moves: everything appears at once, transitions are instant, and 3D scenes and shaders hold a still frame. The system's reduced-motion setting is honoured either way. Sandboxed apps keep their own motion.",
+    default: true,
+  },
+} as const;
+
+/** Controls whether every chat session receives the inline UI instructions automatically. */
+export const INSTRUCTION_SETTINGS = {
+  automaticInstructions: {
+    type: "boolean",
+    label: "Automatic UI instructions",
+    description:
+      "Teaches every chat session the inline UI language automatically (~15 KB of instructions) so agents use components on their own. Off: ordinary sessions receive no UI instructions; invoke the bundled /ui skill when you want interactive replies. The renderer, gallery, and check_ui / ui_examples tools stay available either way. Takes effect on new sessions.",
     default: true,
   },
 } as const;
@@ -224,6 +236,11 @@ export const rpcContract = defineRpcContract({
 export default async function plugin(bb: BbPluginApi) {
   const web = createWebLookups(bb);
   bb.settings.define(MOTION_SETTINGS);
+  const instructionSettings = bb.settings.define(INSTRUCTION_SETTINGS);
+  let automaticInstructions: boolean = (await instructionSettings.get()).automaticInstructions;
+  instructionSettings.onChange((next) => {
+    automaticInstructions = next.automaticInstructions;
+  });
   /** Image searches and Wikipedia photos (Map places) for markdown renderings: the photo found, or null (none, or lookups off). */
   const findImage = {
     search: async (query: string) => {
@@ -242,7 +259,6 @@ export default async function plugin(bb: BbPluginApi) {
     name: "check_ui",
     description:
       "Checks a ```ui block before you put it in your reply: compile errors, files Load or Snippet can't read, inaccessible local images (Image, Gallery, Compare, Hotspots and Entity), wrong line ranges, errors its inputs cause once used (each slider end, toggle, option, emptied list), and the text version of what the user will see. Local images must be in this thread's workspace, $BB_THREAD_STORAGE or /tmp; copy external tool screenshots there first. Optional; use it for blocks with files, images or inputs. With language \"app\" it checks a ```app page instead: script syntax, network use, dialogs, genui calls outside a handler.",
-    instructions: UI_REFERENCE,
     parameters: z.object({
       // A ```ui spec has its own, smaller cap, which compile reports.
       spec: z.string().min(1).max(MAX_APP_CHARS).describe("The block's content, without the ``` fence lines"),
@@ -268,7 +284,6 @@ export default async function plugin(bb: BbPluginApi) {
     name: "ui_examples",
     description:
       "Returns working ```ui examples of the components you name (from the plugin's gallery), with each component's signature. Optional; use it for a component you haven't written before.",
-    instructions: UI_REFERENCE_MORE,
     parameters: z.object({
       components: z.array(z.string().min(1).max(40)).min(1).max(6).describe('Component names, e.g. ["Map", "Chart"]'),
     }),
@@ -279,11 +294,13 @@ export default async function plugin(bb: BbPluginApi) {
     },
   });
 
-  // Threads configure last found to have a person reading their replies. BB
-  // resolves configure before it asks instruction contributors, within the
-  // same session resolution, so the code-work section below reaches exactly
-  // the sessions that get the other three. Bounded; oldest forgotten first.
+  // Threads configure last found to have a person reading their replies while
+  // automatic instructions are on. BB resolves configure before it asks
+  // instruction contributors, within the same session resolution, so the
+  // reference and code-work sections reach exactly the sessions that get the
+  // rules section. Bounded; oldest forgotten first.
   const personThreads = new Set<string>();
+  const contributedReference = `${UI_REFERENCE}\n\n${UI_REFERENCE_MORE}\n\n${CODE_WORK_INSTRUCTIONS}`;
   bb.agents.configure((context) => {
     // Only sessions whose replies a person reads in chat: not threads another
     // agent spawned (their reply goes back to that agent) and not threads a
@@ -295,12 +312,15 @@ export default async function plugin(bb: BbPluginApi) {
         (context.origin.pluginId === null || context.origin.pluginId === "side-chat"));
     personThreads.delete(context.thread.id);
     if (!forPerson) return { tools: [], skills: [] };
+    if (!automaticInstructions) {
+      return { tools: ["check_ui", "ui_examples"], skills: ["ui"] };
+    }
     personThreads.add(context.thread.id);
     if (personThreads.size > MAX_PERSON_THREADS) personThreads.delete(personThreads.values().next().value!);
     const instructions = web.isOn() ? AGENT_INSTRUCTIONS : AGENT_INSTRUCTIONS_WEB_OFF;
     return { tools: ["check_ui", "ui_examples"], skills: [], instructions };
   });
-  bb.agents.contributeInstructions(({ threadId }) => (personThreads.has(threadId) ? CODE_WORK_INSTRUCTIONS : null));
+  bb.agents.contributeInstructions(({ threadId }) => (personThreads.has(threadId) ? contributedReference : null));
 
   bb.rpc.register(rpcContract, {
     async get_ui({ id }) {
